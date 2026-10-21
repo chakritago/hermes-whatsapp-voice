@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark light">
+<meta name="theme-color" content="#0b1220">
+<title>Hermes · Voice</title>
+<script src="https://telegram.org/js/telegram-web-app.js?64"></script>
+<style>
+:root{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color:#eaf1fa;background:#0b1220}
+*{box-sizing:border-box}
+body{margin:0;min-height:100dvh;background:radial-gradient(circle at 50% -15%,#233957 0%,#0b1220 50%)}
+.shell{max-width:560px;margin:0 auto;padding:28px 20px max(32px,env(safe-area-inset-bottom));display:flex;flex-direction:column;min-height:100dvh}
+header{display:flex;align-items:center;gap:12px}
+.logo{display:grid;place-items:center;background:#223f65;color:#80d7ff;border:1px solid #345c86;border-radius:18px;height:52px;width:52px;font-size:26px}
+h1{font-size:23px;margin:0;letter-spacing:-.5px}
+header p{margin:3px 0 0;color:#9fb1c9;font-size:13px}
+.pill{display:inline-flex;align-items:center;gap:8px;padding:7px 13px;border:1px solid #36536a;border-radius:30px;background:#132339;color:#c7d9e9;font-size:13px}
+.dot{height:8px;width:8px;border-radius:50%;background:#8095a8}
+.pill.live .dot{background:#40e0a4;box-shadow:0 0 12px #40e0a4}
+main{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:22px;padding:44px 0 24px}
+.orb-wrap{width:214px;height:214px;border-radius:50%;display:grid;place-items:center;background:radial-gradient(circle,#184977 0%,#112e53 52%,transparent 70%);position:relative}
+.orb-wrap:before{content:"";position:absolute;inset:12px;border:1px solid #4674a477;border-radius:50%}
+.orb{height:122px;width:122px;border-radius:50%;display:grid;place-items:center;background:linear-gradient(145deg,#6fd8ff,#295ebf);box-shadow:0 0 40px #388fc766;color:#fff;font-size:55px}
+.orb-wrap.active .orb{animation:pulse 1.9s ease-in-out infinite}
+@keyframes pulse{50%{transform:scale(1.06);box-shadow:0 0 65px #3ca6ff99}}
+h2{margin:0;font-size:22px;letter-spacing:-.35px}
+.description{margin:0;color:#aabbd0;text-align:center;line-height:1.6;font-size:15px;max-width:320px}
+.actions{width:100%;display:flex;gap:12px}
+button{border:0;border-radius:16px;padding:16px 22px;font-size:16px;font-weight:650;cursor:pointer;flex:1;transition:transform .15s}
+button:active{transform:scale(.97)}
+button:disabled{opacity:.45;cursor:not-allowed}
+#start{background:#55bff7;color:#09203a}
+#end{background:#29364b;color:#eff5fc;border:1px solid #4b5c70;max-width:105px}
+.conversation{width:100%;border:1px solid #2a3f5a;background:#111d30;border-radius:20px;padding:18px;margin-top:16px;min-height:150px}
+.conversation h3{font-size:14px;margin:0 0 12px;color:#cbdcf1}
+#transcript{display:flex;flex-direction:column;gap:12px;max-height:200px;overflow:auto;min-height:60px}
+.message{border-radius:12px;padding:9px 12px;font-size:14px;line-height:1.55;overflow-wrap:anywhere}
+.message.user{align-self:flex-end;background:#244c70;max-width:85%}
+.message.assistant{align-self:flex-start;background:#28364d;max-width:85%}
+.empty{color:#91a3bd;font-size:13px;margin:4px 0}
+footer{text-align:center;color:#8397af;font-size:12px;line-height:1.5;margin-top:16px}
+@media(prefers-reduced-motion:reduce){.orb-wrap.active .orb{animation:none}}
+</style>
+</head>
+<body>
+<div class="shell">
+<header><div class="logo" aria-hidden="true">✦</div><div><h1>Hermes Voice</h1><p>Telegram Mini App · Gemini Live</p></div></header>
+<main>
+<div id="status" class="pill" role="status" aria-live="polite"><span class="dot"></span><span id="statusText">พร้อมเริ่มสนทนา</span></div>
+<div id="orb" class="orb-wrap"><div class="orb" aria-hidden="true">◉</div></div>
+<div style="text-align:center"><h2>คุยกับ Hermes</h2><p class="description" id="description">สนทนาด้วยเสียงแบบเรียลไทม์ ถามคำถามหรือสั่งงาน Hermes ได้โดยตรง</p></div>
+<div class="actions"><button type="button" id="start">🎙 เริ่มสนทนา</button><button type="button" id="end" disabled>วางสาย</button></div>
+<section class="conversation" aria-label="บทสนทนา"><h3>บทสนทนา</h3><div id="transcript" aria-live="polite"><p class="empty">ข้อความจากบทสนทนาจะปรากฏที่นี่</p></div></section>
+</main><footer>เข้ารหัสด้วย HTTPS/WSS · ไมโครโฟนใช้งานเฉพาะระหว่างสนทนา</footer>
+</div>
+<script>
+"use strict";
+const app = window.Telegram && window.Telegram.WebApp;
+if (app) { app.ready(); app.expand(); }
+const start = document.getElementById("start");
+const end = document.getElementById("end");
+const status = document.getElementById("status");
+const statusText = document.getElementById("statusText");
+const description = document.getElementById("description");
+const orb = document.getElementById("orb");
+const transcript = document.getElementById("transcript");
+let socket = null, stream = null, audio = null, processor = null, source = null, mute = null;
+let playAt = 0, playing = [], active = false;
+function state(message, live) {
+  statusText.textContent = message;
+  status.classList.toggle("live", live);
+  orb.classList.toggle("active", live);
+}
+function append(role, text) {
+  if (!text || !text.trim()) return;
+  const empty = transcript.querySelector(".empty");
+  if (empty) empty.remove();
+  const node = document.createElement("div");
+  node.className = "message " + role;
+  node.textContent = text;
+  transcript.appendChild(node);
+  transcript.scrollTop = transcript.scrollHeight;
+  while (transcript.children.length > 40) transcript.firstChild.remove();
+}
+function cancelPlayback() {
+  for (const node of playing) { try { node.stop(); } catch (_) { /* already stopped */ } }
+  playing = []; playAt = 0;
+}
+function playback(bytes) {
+  if (!audio || !active) return;
+  const pcm = new DataView(bytes);
+  if (pcm.byteLength % 2) return;
+  const buffer = audio.createBuffer(1, pcm.byteLength / 2, 24000);
+  const channel = buffer.getChannelData(0);
+  for (let n = 0; n < channel.length; n++) channel[n] = pcm.getInt16(n * 2, true) / 32768;
+  const node = audio.createBufferSource();
+  node.buffer = buffer;
+  node.connect(audio.destination);
+  const when = Math.max(audio.currentTime + 0.025, playAt);
+  node.start(when);
+  playAt = when + buffer.duration;
+  playing.push(node);
+  node.onended = () => { playing = playing.filter(x => x !== node); };
+}
+function toPcm16(samples, sampleRate) {
+  const ratio = sampleRate / 16000;
+  const count = Math.floor(samples.length / ratio);
+  const bytes = new ArrayBuffer(count * 2);
+  const view = new DataView(bytes);
+  for (let n = 0; n < count; n++) {
+    const from = Math.floor(n * ratio);
+    const to = Math.min(samples.length, Math.floor((n + 1) * ratio));
+    let sum = 0;
+    for (let j = from; j < Math.max(from + 1, to); j++) sum += samples[j];
+    const value = Math.max(-1, Math.min(1, sum / Math.max(1, to - from)));
+    view.setInt16(n * 2, value < 0 ? value * 32768 : value * 32767, true);
+  }
+  return bytes;
+}
+async function microphone() {
+  stream = await navigator.mediaDevices.getUserMedia({
+    audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+    video: false
+  });
+  audio = new (window.AudioContext || window.webkitAudioContext)();
+  await audio.resume();
+  source = audio.createMediaStreamSource(stream);
+  processor = audio.createScriptProcessor(4096, 1, 1);
+  mute = audio.createGain();
+  mute.gain.value = 0;
+  processor.onaudioprocess = event => {
+    if (socket && socket.readyState === WebSocket.OPEN && active && socket.bufferedAmount < 262144) {
+      socket.send(toPcm16(event.inputBuffer.getChannelData(0), audio.sampleRate));
+    }
+  };
+  source.connect(processor);
+  processor.connect(mute);
+  mute.connect(audio.destination);
+}
+async function cleanup() {
+  active = false;
+  cancelPlayback();
+  if (processor) { processor.disconnect(); processor.onaudioprocess = null; processor = null; }
+  if (source) { source.disconnect(); source = null; }
+  if (mute) { mute.disconnect(); mute = null; }
+  if (stream) { stream.getTracks().forEach(track => track.stop()); stream = null; }
+  if (audio) { await audio.close().catch(() => {}); audio = null; }
+  if (socket) { const old = socket; socket = null; if (old.readyState < 2) old.close(); }
+  start.disabled = !(app && app.initData); end.disabled = true;
+  state("พร้อมเริ่มสนทนา", false);
+}
+start.addEventListener("click", () => {
+  if (!app || !app.initData || !window.isSecureContext) return;
+  start.disabled = true; state("กำลังเชื่อมต่อ...", false);
+  const scheme = location.protocol === "https:" ? "wss:" : "ws:";
+  socket = new WebSocket(scheme + "//" + location.host + "/ws");
+  socket.binaryType = "arraybuffer";
+  socket.onopen = () => socket.send(JSON.stringify({type: "auth", init_data: app.initData}));
+  socket.onmessage = async event => {
+    if (typeof event.data !== "string") { playback(event.data); return; }
+    const msg = JSON.parse(event.data);
+    if (msg.type === "ready") {
+      try {
+        await microphone(); active = true; end.disabled = false;
+        description.textContent = "พูดได้เลย Hermes กำลังฟังคุณอยู่";
+        state("กำลังสนทนา", true);
+      } catch (_) {
+        description.textContent = "ไม่สามารถใช้ไมโครโฟนได้ โปรดอนุญาตการเข้าถึงใน Telegram";
+        await cleanup();
+      }
+    } else if (msg.type === "interrupted") {
+      cancelPlayback();
+    } else if (msg.type === "transcript") {
+      append(msg.role === "user" ? "user" : "assistant", msg.text);
+    } else if (msg.type === "error" || msg.type === "notice") {
+      description.textContent = msg.message || "เกิดข้อผิดพลาด";
+      if (msg.type === "error") await cleanup();
+    }
+  };
+  socket.onclose = () => { cleanup(); };
+  socket.onerror = () => { description.textContent = "เชื่อมต่อไม่สำเร็จ ตรวจสอบเซิร์ฟเวอร์และ HTTPS"; };
+});
+end.addEventListener("click", async () => {
+  if (socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({type: "stop"}));
+  await cleanup();
+  description.textContent = "สนทนาสิ้นสุดแล้ว เริ่มใหม่ได้ทุกเมื่อ";
+});
+if (!app || !app.initData) {
+  start.disabled = true;
+  description.textContent = "กรุณาเปิด Mini App จากเมนูในแชต Telegram Bot ของคุณ";
+  state("ต้องเปิดผ่าน Telegram", false);
+}
+window.addEventListener("pagehide", () => { cleanup(); });
+</script>
+</body>
+</html>

@@ -1,0 +1,26 @@
+name: telegram-miniapp
+
+on:
+  push:
+    branches: [main, feat/telegram-miniapp-live-voice]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  telegram:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python -m pip install pytest ruff aiohttp
+      - run: ruff check telegram_miniapp tests/test_telegram_miniapp.py
+      - run: ruff format --check telegram_miniapp tests/test_telegram_miniapp.py
+      - run: python -m pytest tests/test_telegram_miniapp.py -q

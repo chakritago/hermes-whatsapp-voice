@@ -216,3 +216,20 @@ with the tag.
 ## License
 
 MIT
+
+
+## Telegram Mini App (live voice, including Windows)
+
+**New optional integration:** Talk to Hermes inside a Telegram Mini App using
+Gemini 3.8 Live (microphone streaming over HTTPS/WSS). This does **not** replace or
+modify the existing WhatsApp linked-device implementation.
+
+- Windows PowerShell launcher: telegram_miniapp/start_windows.ps1
+- Backend and Mini App: telegram_miniapp/server.py and telegram_miniapp/web/index.html
+- Owner-only Telegram initData verification, Gemini Live audio relay, Hermes ask_hermes tool
+- Installation, HTTPS proxy and configuration: [Telegram Mini App guide](docs/telegram-miniapp.md)
+- GitHub Actions runs offline tests on Windows and Linux.
+
+**Important:** Telegram Mini App voice chat is not a native Telegram phone call.
+The app requires a publicly reachable HTTPS URL and your own Telegram bot,
+Gemini key and enabled Hermes API server. The original WhatsApp calls remain available.
