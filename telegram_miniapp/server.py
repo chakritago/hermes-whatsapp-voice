@@ -17,12 +17,12 @@ import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
-
-from .alerts import gateway_watch
-from .recovery import Recovery, RecoveryStore, resume_setup, update_handle
 from urllib.parse import parse_qsl, urlparse
 
 from aiohttp import ClientError, ClientSession, ClientTimeout, WSMsgType, web
+
+from .alerts import gateway_watch
+from .recovery import Recovery, RecoveryStore, resume_setup, update_handle
 
 LOG = logging.getLogger("hermes.telegram_voice")
 GEMINI_ENDPOINT = (

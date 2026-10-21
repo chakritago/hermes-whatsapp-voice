@@ -199,13 +199,12 @@ def test_server_owner_only_websocket_rejects_bad_initdata():
 
     async def check():
         config = Config(TOKEN, OWNER, "gemini-test", "hermes-test", public_url="https://voice.example.com", alerts_enabled=False)
-        async with TestServer(create_app(config)) as server:
-            async with TestClient(server) as client:
-                ws = await client.ws_connect("/ws", headers={"Origin": "https://voice.example.com"})
-                await ws.send_json({"type": "auth", "init_data": signed_data(user_id=OWNER + 2)})
-                message = await ws.receive(timeout=2)
-                assert message.type == WSMsgType.TEXT
-                assert json.loads(message.data)["type"] == "error"
-                await ws.close()
+        async with TestServer(create_app(config)) as server, TestClient(server) as client:
+            ws = await client.ws_connect("/ws", headers={"Origin": "https://voice.example.com"})
+            await ws.send_json({"type": "auth", "init_data": signed_data(user_id=OWNER + 2)})
+            message = await ws.receive(timeout=2)
+            assert message.type == WSMsgType.TEXT
+            assert json.loads(message.data)["type"] == "error"
+            await ws.close()
 
     asyncio.run(check())
