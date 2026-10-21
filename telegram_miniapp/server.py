@@ -176,7 +176,7 @@ async def run_hermes(
                 ) as response:
                     response.raise_for_status()
                     status = await response.json()
-            except (ClientError, asyncio.TimeoutError):
+            except (ClientError, TimeoutError):
                 continue
             if status.get("status") in TERMINAL:
                 finished = True
@@ -184,7 +184,7 @@ async def run_hermes(
                     return "Hermes task " + status["status"] + ": " + str(status.get("error", ""))
                 return str(status.get("output", ""))[:8000] or "Hermes completed with no text output."
         return "Hermes timed out. The task was not confirmed complete."
-    except (ClientError, KeyError, asyncio.TimeoutError, ValueError) as exc:
+    except (ClientError, KeyError, TimeoutError, ValueError) as exc:
         LOG.warning("Hermes run failed: %s", type(exc).__name__)
         return "Hermes API unavailable or returned an invalid response."
     finally:
@@ -196,7 +196,7 @@ async def run_hermes(
                     timeout=ClientTimeout(total=5),
                 ) as response:
                     await response.read()
-            except (ClientError, asyncio.TimeoutError):
+            except (ClientError, TimeoutError):
                 pass
 
 
@@ -242,7 +242,7 @@ async def socket_handler(request: web.Request) -> web.StreamResponse:
         if auth.get("type") != "auth":
             raise ValueError("invalid auth message")
         user = validate_init_data(auth.get("init_data", ""), config.bot_token, config.owner_id)
-    except (ValueError, KeyError, TypeError, json.JSONDecodeError, asyncio.TimeoutError):
+    except (ValueError, KeyError, TypeError, json.JSONDecodeError, TimeoutError):
         await ws.send_json({"type": "error", "message": "Telegram login invalid or expired"})
         await ws.close(code=1008)
         return ws
@@ -363,7 +363,7 @@ async def voice_session(ws: web.WebSocketResponse, config: Config, user: dict) -
                     asyncio.create_task(relay_gemini()),
                 ]
                 try:
-                    done, pending = await asyncio.wait(
+                    done, _pending = await asyncio.wait(
                         transports, timeout=MAX_SESSION_SECONDS,
                         return_when=asyncio.FIRST_COMPLETED,
                     )
@@ -378,7 +378,7 @@ async def voice_session(ws: web.WebSocketResponse, config: Config, user: dict) -
                     for task in transports + list(tasks):
                         task.cancel()
                     await asyncio.gather(*transports, *tasks, return_exceptions=True)
-        except (ClientError, asyncio.TimeoutError, RuntimeError, ValueError, json.JSONDecodeError) as exc:
+        except (ClientError, TimeoutError, RuntimeError, ValueError, json.JSONDecodeError) as exc:
             LOG.warning("Voice session ended: %s", type(exc).__name__)
             if not ws.closed:
                 await ws.send_json({"type": "error", "message": "Voice service unavailable. Try again."})
