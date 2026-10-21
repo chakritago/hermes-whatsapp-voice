@@ -20,7 +20,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - run: python -m pip install pytest ruff aiohttp
+      - run: python -m pip install -r requirements-dev.txt
       - run: ruff format telegram_miniapp tests/test_telegram_miniapp.py
       - run: ruff check telegram_miniapp tests/test_telegram_miniapp.py
       - run: ruff format --check telegram_miniapp tests/test_telegram_miniapp.py
