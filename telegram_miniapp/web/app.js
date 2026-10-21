@@ -18,6 +18,7 @@ let analyser = null, silentGain = null, outputGain = null, outputStream = null;
 let active = false, desired = false, muted = false, audioInitializing = false;
 let playAt = 0, playing = [], reconnectCount = 0, reconnectTimer = null;
 let resumeTicket = null, waveFrame = null, waveMode = "bars", connectionSequence = 0;
+let readyAt = 0;
 const MAX_BROWSER_RETRIES = 5;
 
 function state(message, live = false, phase = "") {
@@ -202,6 +203,8 @@ async function disposeAudio() {
   audio = null;
 }
 function scheduleReconnect() {
+  if (readyAt && Date.now() - readyAt > 15000) reconnectCount = 0;
+  readyAt = 0;
   active = false;
   syncMute();
   if (!desired) return;
@@ -238,7 +241,7 @@ function connectSocket() {
         if (!stream) throw new Error("no microphone permission");
         if (generation !== connectionSequence || !desired) return;
         resumeTicket = msg.resume_ticket || null;
-        reconnectCount = 0; active = true; syncMute();
+        readyAt = Date.now(); active = true; syncMute();
         start.disabled = true; end.disabled = false; mute.disabled = false;
         state(msg.restored ? "กู้คืนการสนทนาสำเร็จ" : "กำลังสนทนา", true, "connected");
         description.textContent = "พูดได้เลย Hermes กำลังฟังคุณอยู่";
@@ -258,7 +261,7 @@ function connectSocket() {
     } else if (msg.type === "error") {
       description.textContent = msg.message || "ไม่สามารถเชื่อมต่อได้";
       // Authentication or competing session errors must not retry indefinitely.
-      if (/login|expired|Another voice session/.test(msg.message || "")) stop(false);
+      if (/login|expired/.test(msg.message || "")) stop(false);
     }
   };
   ws.onclose = () => {
