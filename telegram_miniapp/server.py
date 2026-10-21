@@ -14,10 +14,12 @@ import json
 import logging
 import os
 import re
-import secrets
 import time
 from dataclasses import dataclass
 from pathlib import Path
+
+from .alerts import gateway_watch
+from .recovery import Recovery, RecoveryStore, resume_setup, update_handle
 from urllib.parse import parse_qsl, urlparse
 
 from aiohttp import ClientError, ClientSession, ClientTimeout, WSMsgType, web
@@ -42,6 +44,7 @@ class Config:
     model: str = "gemini-3.8-live"
     voice: str = "Kore"
     public_url: str = ""
+    alerts_enabled: bool = True
 
     @classmethod
     def from_env(cls) -> Config:
@@ -72,6 +75,7 @@ class Config:
             model=os.getenv("GEMINI_LIVE_MODEL", "gemini-3.8-live"),
             voice=os.getenv("GEMINI_VOICE", "Kore"),
             public_url=os.getenv("MINIAPP_PUBLIC_URL", "").rstrip("/"),
+            alerts_enabled=os.getenv("GATEWAY_ALERTS_ENABLED", "true").lower() in ("true", "1", "yes"),
         )
 
 
@@ -212,11 +216,18 @@ async def index(request: web.Request) -> web.FileResponse:
     return web.FileResponse(Path(__file__).parent / "web" / "index.html", headers={
         "Cache-Control": "no-store",
         "Content-Security-Policy": (
-            "default-src 'none'; script-src 'unsafe-inline' https://telegram.org; "
+            "default-src 'none'; script-src 'self' https://telegram.org; "
             "style-src 'unsafe-inline'; connect-src 'self' wss:; "
-            "img-src 'self' data:; base-uri 'none'; frame-ancestors 'none'"
+            "img-src 'self' data:; base-uri 'none'; frame-ancestors https://web.telegram.org"
         ),
     })
+
+
+async def script(request: web.Request) -> web.FileResponse:
+    return web.FileResponse(
+        Path(__file__).parent / "web" / "app.js",
+        headers={"Cache-Control": "no-store", "Content-Type": "application/javascript; charset=utf-8"},
+    )
 
 
 async def health(request: web.Request) -> web.Response:
@@ -229,39 +240,63 @@ async def socket_handler(request: web.Request) -> web.StreamResponse:
         raise web.HTTPForbidden(text="Origin not allowed")
     ws = web.WebSocketResponse(max_msg_size=MAX_AUDIO_FRAME + 1024, heartbeat=20)
     await ws.prepare(request)
-    lock: asyncio.Lock = request.app["call_lock"]
-    if lock.locked():
-        await ws.send_json({"type": "error", "message": "Another voice session is active"})
-        await ws.close()
-        return ws
     try:
         first = await ws.receive(timeout=10)
         if first.type != WSMsgType.TEXT:
-            raise ValueError("Telegram authorization is required")
+            raise ValueError("Telegram authorization required")
         auth = json.loads(first.data)
-        if auth.get("type") != "auth":
-            raise ValueError("invalid auth message")
+        if not isinstance(auth, dict) or auth.get("type") != "auth":
+            raise ValueError("invalid authentication message")
         user = validate_init_data(auth.get("init_data", ""), config.bot_token, config.owner_id)
-    except (ValueError, KeyError, TypeError, json.JSONDecodeError, TimeoutError):
+    except (ValueError, KeyError, TypeError, TimeoutError, json.JSONDecodeError):
         await ws.send_json({"type": "error", "message": "Telegram login invalid or expired"})
         await ws.close(code=1008)
         return ws
 
+    lock: asyncio.Lock = request.app["call_lock"]
+    if lock.locked():
+        await ws.send_json({"type": "error", "message": "Another voice session is active"})
+        await ws.close(code=1008)
+        return ws
+
+    # No await between the lock check and acquisition: only one authenticated
+    # session can own Gemini/Hermes, including during reconnection handoffs.
     await lock.acquire()
+    tickets: RecoveryStore = request.app["recoveries"]
+    ticket, recovery, restored = tickets.acquire(user["id"], auth.get("resume_ticket"))
+    stopped = False
     try:
-        await voice_session(ws, config, user)
+        stopped = await voice_session(ws, config, user, ticket, recovery, restored)
     finally:
+        tickets.release(ticket, stopped=stopped)
         lock.release()
         await ws.close()
     return ws
 
 
-async def voice_session(ws: web.WebSocketResponse, config: Config, user: dict) -> None:
-    tasks: set[asyncio.Task] = set()
+async def voice_session(
+    ws: web.WebSocketResponse,
+    config: Config,
+    user: dict,
+    ticket: str,
+    recovery: Recovery,
+    restored: bool,
+) -> bool:
+    """Bridge one browser socket; a short-lived recovery ticket survives disconnects.
+
+    Hermes session ID is reused across browser reconnects. Gemini's latest
+    explicitly resumable handle is used for connection rotations.
+    """
+    stopped = False
+    tasks: dict[str, asyncio.Task] = {}
     send_lock = asyncio.Lock()
-    session_id = "telegram-voice-" + secrets.token_hex(12)
+    current: dict = {"upstream": None}
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + MAX_SESSION_SECONDS
+
     async with ClientSession(timeout=ClientTimeout(total=None)) as session:
-        try:
+
+        async def connect_live() -> None:
             upstream = await session.ws_connect(
                 GEMINI_ENDPOINT,
                 headers={"x-goog-api-key": config.gemini_key},
@@ -269,65 +304,96 @@ async def voice_session(ws: web.WebSocketResponse, config: Config, user: dict) -
                 timeout=15,
                 max_msg_size=2**22,
             )
-            async with upstream:
-                await upstream.send_json(setup_message(config))
+            try:
+                await upstream.send_json(resume_setup(setup_message(config), recovery.gemini_handle))
                 ready = await upstream.receive(timeout=20)
                 if ready.type != WSMsgType.TEXT or "setupComplete" not in json.loads(ready.data):
                     raise RuntimeError("Gemini Live did not confirm session setup")
-                await ws.send_json({"type": "ready", "user": user.get("first_name", "")})
+            except BaseException:
+                await upstream.close()
+                raise
+            current["upstream"] = upstream
 
-                async def send_upstream(message: dict) -> None:
-                    async with send_lock:
-                        if not upstream.closed:
-                            await upstream.send_json(message)
+        async def send_upstream(message: dict) -> None:
+            async with send_lock:
+                upstream = current["upstream"]
+                if upstream is not None and not upstream.closed:
+                    try:
+                        await upstream.send_json(message)
+                    except ClientError:
+                        pass  # Relay will reconnect; stale microphone frames are not replayed.
 
-                async def relay_microphone() -> None:
-                    async for item in ws:
-                        if item.type == WSMsgType.BINARY:
-                            if len(item.data) > MAX_AUDIO_FRAME or len(item.data) % 2:
-                                break
-                            await send_upstream({
-                                "realtimeInput": {
-                                    "audio": {
-                                        "data": base64.b64encode(item.data).decode("ascii"),
-                                        "mimeType": "audio/pcm;rate=16000",
-                                    }
-                                }
-                            })
-                        elif item.type == WSMsgType.TEXT:
-                            data = json.loads(item.data)
-                            if data.get("type") == "stop":
-                                break
-                        else:
-                            break
-
-                async def handle_call(call: dict) -> None:
-                    call_id = call.get("id", "")
-                    name = call.get("name", "")
-                    args = call.get("args") or {}
-                    if name == "ask_hermes" and isinstance(args, dict):
-                        question = str(args.get("request", "")).strip()
-                        result = (
-                            await run_hermes(session, config, question, session_id)
-                            if question else "Empty Hermes request."
-                        )
-                    else:
-                        result = "Unknown tool."
+        async def relay_microphone() -> None:
+            nonlocal stopped
+            async for item in ws:
+                if item.type == WSMsgType.BINARY:
+                    if len(item.data) > MAX_AUDIO_FRAME or len(item.data) % 2:
+                        break
                     await send_upstream({
-                        "toolResponse": {
-                            "functionResponses": [{
-                                "id": call_id,
-                                "name": name,
-                                "response": {"result": result},
-                            }]
+                        "realtimeInput": {
+                            "audio": {
+                                "data": base64.b64encode(item.data).decode("ascii"),
+                                "mimeType": "audio/pcm;rate=16000",
+                            }
                         }
                     })
+                elif item.type == WSMsgType.TEXT:
+                    try:
+                        data = json.loads(item.data)
+                    except json.JSONDecodeError:
+                        break
+                    if isinstance(data, dict) and data.get("type") == "stop":
+                        stopped = True
+                        break
+                else:
+                    break
 
-                async def relay_gemini() -> None:
+        async def handle_call(call: dict) -> None:
+            call_id = str(call.get("id", ""))
+            name = call.get("name", "")
+            args = call.get("args") or {}
+            if name == "ask_hermes" and isinstance(args, dict):
+                question = str(args.get("request", "")).strip()
+                result = (
+                    await run_hermes(session, config, question, recovery.hermes_session)
+                    if question else "Empty Hermes request."
+                )
+            else:
+                result = "Unknown tool."
+            await send_upstream({
+                "toolResponse": {
+                    "functionResponses": [{
+                        "id": call_id,
+                        "name": name,
+                        "response": {"result": result},
+                    }]
+                }
+            })
+
+        async def relay_gemini() -> None:
+            failures = 0
+            while not ws.closed and loop.time() < deadline:
+                if current["upstream"] is None or current["upstream"].closed:
+                    try:
+                        await connect_live()
+                    except (ClientError, TimeoutError, RuntimeError, ValueError, json.JSONDecodeError):
+                        failures += 1
+                        if failures > 4:
+                            raise RuntimeError("Gemini could not reconnect") from None
+                        await ws.send_json({
+                            "type": "status", "phase": "reconnecting",
+                            "attempt": failures, "message": "กำลังเชื่อมต่อ Gemini ใหม่",
+                        })
+                        await asyncio.sleep(min(8, 2 ** (failures - 1)))
+                        continue
+
+                try:
+                    upstream = current["upstream"]
                     async for item in upstream:
                         if item.type != WSMsgType.TEXT:
                             break
                         packet = json.loads(item.data)
+                        update_handle(recovery, packet)
                         content = packet.get("serverContent") or {}
                         if content.get("interrupted"):
                             await ws.send_json({"type": "interrupted"})
@@ -342,55 +408,114 @@ async def voice_session(ws: web.WebSocketResponse, config: Config, user: dict) -
                             transcript = (content.get(field) or {}).get("text")
                             if transcript:
                                 await ws.send_json({
-                                    "type": "transcript",
-                                    "role": kind,
+                                    "type": "transcript", "role": kind,
                                     "text": transcript[:2000],
                                 })
-                        if packet.get("goAway"):
-                            await ws.send_json({
-                                "type": "notice",
-                                "message": "Gemini session ending; reconnect to continue.",
-                            })
+                        for cancel_id in (packet.get("toolCallCancellation") or {}).get("ids", []):
+                            task = tasks.get(cancel_id)
+                            if task:
+                                task.cancel()
                         for call in (packet.get("toolCall") or {}).get("functionCalls", []):
-                            if len(tasks) >= 2:
+                            call_id = str(call.get("id", ""))
+                            if call_id in tasks or len(tasks) >= 2:
                                 continue
                             task = asyncio.create_task(handle_call(call))
-                            tasks.add(task)
-                            task.add_done_callback(tasks.discard)
-
-                transports = [
-                    asyncio.create_task(relay_microphone()),
-                    asyncio.create_task(relay_gemini()),
-                ]
-                try:
-                    done, _pending = await asyncio.wait(
-                        transports, timeout=MAX_SESSION_SECONDS,
-                        return_when=asyncio.FIRST_COMPLETED,
-                    )
-                    for completed in done:
-                        completed.result()
-                    if not done:
-                        await ws.send_json({
-                            "type": "notice",
-                            "message": "15-minute session limit reached. Start a new conversation.",
-                        })
+                            tasks[call_id] = task
+                            task.add_done_callback(lambda _, key=call_id: tasks.pop(key, None))
+                        # Reconnect proactively on goAway only with a valid handle.
+                        if packet.get("goAway") and recovery.gemini_handle:
+                            break
+                    failures += 1
+                except (ClientError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
+                    LOG.warning("Gemini connection interrupted: %s", type(exc).__name__)
+                    failures += 1
                 finally:
-                    for task in transports + list(tasks):
-                        task.cancel()
-                    await asyncio.gather(*transports, *tasks, return_exceptions=True)
+                    old = current["upstream"]
+                    current["upstream"] = None
+                    if old is not None:
+                        await old.close()
+                if failures > 4:
+                    raise RuntimeError("Gemini reconnect limit reached")
+                await ws.send_json({
+                    "type": "status", "phase": "reconnecting",
+                    "attempt": failures,
+                    "message": "กำลังกู้คืน Gemini Live Session"
+                    if recovery.gemini_handle else "กำลังเริ่ม Gemini Session ใหม่",
+                })
+                await asyncio.sleep(min(8, 2 ** (failures - 1)))
+                # A successful setup below resets the retry budget.
+                if current["upstream"] is None:
+                    try:
+                        await connect_live()
+                    except (ClientError, TimeoutError, RuntimeError, ValueError, json.JSONDecodeError):
+                        continue
+                    failures = 0
+                    await ws.send_json({
+                        "type": "status",
+                        "phase": "restored" if recovery.gemini_handle else "new_session",
+                        "message": "เชื่อมต่อ Gemini สำเร็จ",
+                    })
+
+        try:
+            await connect_live()
+            await ws.send_json({
+                "type": "ready", "user": user.get("first_name", ""),
+                "resume_ticket": ticket, "restored": restored,
+                "gemini_resumable": bool(recovery.gemini_handle),
+            })
+            transports = [
+                asyncio.create_task(relay_microphone()),
+                asyncio.create_task(relay_gemini()),
+            ]
+            try:
+                done, _pending = await asyncio.wait(
+                    transports, timeout=MAX_SESSION_SECONDS, return_when=asyncio.FIRST_COMPLETED,
+                )
+                for completed in done:
+                    completed.result()
+                if not done:
+                    await ws.send_json({
+                        "type": "notice",
+                        "message": "ครบ 15 นาทีแล้ว กรุณาเริ่มสนทนาใหม่",
+                    })
+            finally:
+                for task in transports + list(tasks.values()):
+                    task.cancel()
+                await asyncio.gather(*transports, *tasks.values(), return_exceptions=True)
         except (ClientError, TimeoutError, RuntimeError, ValueError, json.JSONDecodeError) as exc:
             LOG.warning("Voice session ended: %s", type(exc).__name__)
             if not ws.closed:
                 await ws.send_json({"type": "error", "message": "Voice service unavailable. Try again."})
+        finally:
+            if current["upstream"] is not None:
+                await current["upstream"].close()
+    return stopped
+
+
+async def on_startup(app: web.Application) -> None:
+    config: Config = app["config"]
+    if config.alerts_enabled:
+        app["alert_task"] = asyncio.create_task(gateway_watch(config))
+
+
+async def on_cleanup(app: web.Application) -> None:
+    task = app.get("alert_task")
+    if task is not None:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
 
 
 def create_app(config: Config) -> web.Application:
     app = web.Application(client_max_size=MAX_AUDIO_FRAME + 1024)
     app["config"] = config
     app["call_lock"] = asyncio.Lock()
+    app["recoveries"] = RecoveryStore()
     app.router.add_get("/", index)
+    app.router.add_get("/app.js", script)
     app.router.add_get("/healthz", health)
     app.router.add_get("/ws", socket_handler)
+    app.on_startup.append(on_startup)
+    app.on_cleanup.append(on_cleanup)
     return app
 
 

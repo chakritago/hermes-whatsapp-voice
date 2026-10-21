@@ -42,6 +42,25 @@ button:disabled{opacity:.45;cursor:not-allowed}
 .empty{color:#91a3bd;font-size:13px;margin:4px 0}
 footer{text-align:center;color:#8397af;font-size:12px;line-height:1.5;margin-top:16px}
 @media(prefers-reduced-motion:reduce){.orb-wrap.active .orb{animation:none}}
+
+.orb-wrap{width:174px;height:174px;margin-bottom:0;transition:transform .2s}
+.orb{width:108px;height:108px;border:1px solid #a1f0ff99}
+.avatar-face{width:58px;height:48px;border-radius:48% 48% 42% 42%;background:#113a76;display:flex;align-items:center;justify-content:center;gap:10px;border:2px solid #b4f1ff;box-shadow:inset 0 0 16px #75e3ff66}
+.avatar-eye{width:9px;height:13px;border-radius:12px;background:#b5f9ff;box-shadow:0 0 10px #9df7ff}
+#visualizer{flex:none;min-height:116px;width:min(100%,390px);padding:9px 8px;background:#101e32;color:#b9d8ee;border:1px solid #284565;border-radius:18px;display:flex;flex-direction:column;align-items:center;gap:1px}
+#visualizer canvas{display:block;width:100%;max-width:360px;height:84px}
+#visualizer span{font-size:11px;color:#94aac4}
+.controls{display:flex;gap:10px;flex-wrap:wrap;width:100%;align-items:center}
+.controls button{flex:0 0 auto;background:#233c55;color:#e5f3fc;font-size:14px;min-height:46px;padding:10px 14px}
+.controls button.muted{background:#603d4b;color:#ffe0e0}
+.controls label{min-width:0;flex:1;font-size:13px;color:#a6bdd6;display:flex;gap:8px;align-items:center}
+.controls label[hidden]{display:none}
+.controls select{flex:1;min-width:0;width:100%;max-width:275px;padding:12px 8px;border-radius:12px;background:#1a3049;color:#e1f4ff;border:1px solid #3b668c;font-size:13px}
+#reconnectInfo{min-height:18px;color:#8acdf5;font-size:13px;margin:0;text-align:center}
+.pill[data-phase="reconnecting"] .dot{background:#e7c56a;animation:blink 1s infinite}
+@keyframes blink{50%{opacity:.2}}
+@media(prefers-reduced-motion:reduce){.pill[data-phase="reconnecting"] .dot{animation:none}}
+@media(max-width:380px){.shell{padding:16px 12px 24px}main{gap:12px;padding:18px 0}.orb-wrap{width:144px;height:144px}}
 </style>
 </head>
 <body>
@@ -49,150 +68,24 @@ footer{text-align:center;color:#8397af;font-size:12px;line-height:1.5;margin-top
 <header><div class="logo" aria-hidden="true">✦</div><div><h1>Hermes Voice</h1><p>Telegram Mini App · Gemini Live</p></div></header>
 <main>
 <div id="status" class="pill" role="status" aria-live="polite"><span class="dot"></span><span id="statusText">พร้อมเริ่มสนทนา</span></div>
-<div id="orb" class="orb-wrap"><div class="orb" aria-hidden="true">◉</div></div>
+<div id="orb" class="orb-wrap">
+  <div class="orb" aria-label="Hermes Avatar"><div class="avatar-face" aria-hidden="true"><span class="avatar-eye"></span><span class="avatar-eye"></span></div></div>
+</div>
+<button type="button" id="visualizer" aria-label="แสดงคลื่นเสียงแบบแท่ง กดเพื่อเปลี่ยน">
+  <canvas id="waveform" width="360" height="84" aria-hidden="true"></canvas>
+  <span>แตะเพื่อสลับรูปแบบคลื่นเสียง</span>
+</button>
 <div style="text-align:center"><h2>คุยกับ Hermes</h2><p class="description" id="description">สนทนาด้วยเสียงแบบเรียลไทม์ ถามคำถามหรือสั่งงาน Hermes ได้โดยตรง</p></div>
 <div class="actions"><button type="button" id="start">🎙 เริ่มสนทนา</button><button type="button" id="end" disabled>วางสาย</button></div>
+<div class="controls">
+  <button type="button" id="mute" disabled aria-pressed="false">🎙 ปิดไมค์</button>
+  <label id="outputRow" hidden>ลำโพง <select id="outputSelect" aria-label="เลือกอุปกรณ์เสียง"><option value="default">ลำโพงเริ่มต้น</option></select></label>
+</div>
+<p id="reconnectInfo" role="status" aria-live="polite"></p>
+<audio id="speakerAudio" autoplay playsinline hidden></audio>
 <section class="conversation" aria-label="บทสนทนา"><h3>บทสนทนา</h3><div id="transcript" aria-live="polite"><p class="empty">ข้อความจากบทสนทนาจะปรากฏที่นี่</p></div></section>
 </main><footer>เข้ารหัสด้วย HTTPS/WSS · ไมโครโฟนใช้งานเฉพาะระหว่างสนทนา</footer>
 </div>
-<script>
-"use strict";
-const app = window.Telegram && window.Telegram.WebApp;
-if (app) { app.ready(); app.expand(); }
-const start = document.getElementById("start");
-const end = document.getElementById("end");
-const status = document.getElementById("status");
-const statusText = document.getElementById("statusText");
-const description = document.getElementById("description");
-const orb = document.getElementById("orb");
-const transcript = document.getElementById("transcript");
-let socket = null, stream = null, audio = null, processor = null, source = null, mute = null;
-let playAt = 0, playing = [], active = false;
-function state(message, live) {
-  statusText.textContent = message;
-  status.classList.toggle("live", live);
-  orb.classList.toggle("active", live);
-}
-function append(role, text) {
-  if (!text || !text.trim()) return;
-  const empty = transcript.querySelector(".empty");
-  if (empty) empty.remove();
-  const node = document.createElement("div");
-  node.className = "message " + role;
-  node.textContent = text;
-  transcript.appendChild(node);
-  transcript.scrollTop = transcript.scrollHeight;
-  while (transcript.children.length > 40) transcript.firstChild.remove();
-}
-function cancelPlayback() {
-  for (const node of playing) { try { node.stop(); } catch (_) { /* already stopped */ } }
-  playing = []; playAt = 0;
-}
-function playback(bytes) {
-  if (!audio || !active) return;
-  const pcm = new DataView(bytes);
-  if (pcm.byteLength % 2) return;
-  const buffer = audio.createBuffer(1, pcm.byteLength / 2, 24000);
-  const channel = buffer.getChannelData(0);
-  for (let n = 0; n < channel.length; n++) channel[n] = pcm.getInt16(n * 2, true) / 32768;
-  const node = audio.createBufferSource();
-  node.buffer = buffer;
-  node.connect(audio.destination);
-  const when = Math.max(audio.currentTime + 0.025, playAt);
-  node.start(when);
-  playAt = when + buffer.duration;
-  playing.push(node);
-  node.onended = () => { playing = playing.filter(x => x !== node); };
-}
-function toPcm16(samples, sampleRate) {
-  const ratio = sampleRate / 16000;
-  const count = Math.floor(samples.length / ratio);
-  const bytes = new ArrayBuffer(count * 2);
-  const view = new DataView(bytes);
-  for (let n = 0; n < count; n++) {
-    const from = Math.floor(n * ratio);
-    const to = Math.min(samples.length, Math.floor((n + 1) * ratio));
-    let sum = 0;
-    for (let j = from; j < Math.max(from + 1, to); j++) sum += samples[j];
-    const value = Math.max(-1, Math.min(1, sum / Math.max(1, to - from)));
-    view.setInt16(n * 2, value < 0 ? value * 32768 : value * 32767, true);
-  }
-  return bytes;
-}
-async function microphone() {
-  stream = await navigator.mediaDevices.getUserMedia({
-    audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-    video: false
-  });
-  audio = new (window.AudioContext || window.webkitAudioContext)();
-  await audio.resume();
-  source = audio.createMediaStreamSource(stream);
-  processor = audio.createScriptProcessor(4096, 1, 1);
-  mute = audio.createGain();
-  mute.gain.value = 0;
-  processor.onaudioprocess = event => {
-    if (socket && socket.readyState === WebSocket.OPEN && active && socket.bufferedAmount < 262144) {
-      socket.send(toPcm16(event.inputBuffer.getChannelData(0), audio.sampleRate));
-    }
-  };
-  source.connect(processor);
-  processor.connect(mute);
-  mute.connect(audio.destination);
-}
-async function cleanup() {
-  active = false;
-  cancelPlayback();
-  if (processor) { processor.disconnect(); processor.onaudioprocess = null; processor = null; }
-  if (source) { source.disconnect(); source = null; }
-  if (mute) { mute.disconnect(); mute = null; }
-  if (stream) { stream.getTracks().forEach(track => track.stop()); stream = null; }
-  if (audio) { await audio.close().catch(() => {}); audio = null; }
-  if (socket) { const old = socket; socket = null; if (old.readyState < 2) old.close(); }
-  start.disabled = !(app && app.initData); end.disabled = true;
-  state("พร้อมเริ่มสนทนา", false);
-}
-start.addEventListener("click", () => {
-  if (!app || !app.initData || !window.isSecureContext) return;
-  start.disabled = true; state("กำลังเชื่อมต่อ...", false);
-  const scheme = location.protocol === "https:" ? "wss:" : "ws:";
-  socket = new WebSocket(scheme + "//" + location.host + "/ws");
-  socket.binaryType = "arraybuffer";
-  socket.onopen = () => socket.send(JSON.stringify({type: "auth", init_data: app.initData}));
-  socket.onmessage = async event => {
-    if (typeof event.data !== "string") { playback(event.data); return; }
-    const msg = JSON.parse(event.data);
-    if (msg.type === "ready") {
-      try {
-        await microphone(); active = true; end.disabled = false;
-        description.textContent = "พูดได้เลย Hermes กำลังฟังคุณอยู่";
-        state("กำลังสนทนา", true);
-      } catch (_) {
-        description.textContent = "ไม่สามารถใช้ไมโครโฟนได้ โปรดอนุญาตการเข้าถึงใน Telegram";
-        await cleanup();
-      }
-    } else if (msg.type === "interrupted") {
-      cancelPlayback();
-    } else if (msg.type === "transcript") {
-      append(msg.role === "user" ? "user" : "assistant", msg.text);
-    } else if (msg.type === "error" || msg.type === "notice") {
-      description.textContent = msg.message || "เกิดข้อผิดพลาด";
-      if (msg.type === "error") await cleanup();
-    }
-  };
-  socket.onclose = () => { cleanup(); };
-  socket.onerror = () => { description.textContent = "เชื่อมต่อไม่สำเร็จ ตรวจสอบเซิร์ฟเวอร์และ HTTPS"; };
-});
-end.addEventListener("click", async () => {
-  if (socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({type: "stop"}));
-  await cleanup();
-  description.textContent = "สนทนาสิ้นสุดแล้ว เริ่มใหม่ได้ทุกเมื่อ";
-});
-if (!app || !app.initData) {
-  start.disabled = true;
-  description.textContent = "กรุณาเปิด Mini App จากเมนูในแชต Telegram Bot ของคุณ";
-  state("ต้องเปิดผ่าน Telegram", false);
-}
-window.addEventListener("pagehide", () => { cleanup(); });
-</script>
+<script src="/app.js" defer></script>
 </body>
 </html>

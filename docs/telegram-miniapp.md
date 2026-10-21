@@ -73,9 +73,37 @@ Run via your existing service manager; protect secrets as environment variables.
   lower-jitter production audio on supported Telegram WebViews.
 - Telegram bot cannot initiate a native Telegram call. Existing WhatsApp calling
   remains available separately.
-- Gemini may end or rotate a Live session; the user can reconnect. Automatic session
-  resumption is not implemented in this initial release.
+- Gemini Live automatically reconnects (up to four attempts, exponential backoff).
+  Latest `sessionResumptionUpdate.newHandle` is used if Gemini marks it resumable.
+  If Gemini has not supplied a valid handle, a new Gemini session is started and
+  **voice context may be lost**. Hermes /v1/runs session ID remains unchanged.
+- Browser WebSocket retries up to five times (1, 2, 4, 8, 16 seconds).
+  An opaque, owner-bound recovery ticket lasts at most 120 seconds after disconnect,
+  **only in server memory**; process restarts invalidate it. Signed Telegram
+  initData is reverified on every connection; there is no anonymous bypass.
+- A live status pill shows connecting/reconnecting/restored states. Waveform
+  visualizer toggles between bars/line on tap, with reduced-motion support.
+- Microphone mute disables the capture track and stops sending PCM frames.
+  Output-device selection uses `HTMLMediaElement.setSinkId` when available.
+  Telegram mobile WebViews often do not support speaker selection, so the
+  device-default speaker remains the fallback.
 - Hardware microphone and actual Gemini connections require manual end-to-end testing.
+
+## Telegram Gateway Alerts
+
+Enabled by default (disable with `GATEWAY_ALERTS_ENABLED=false`). The monitor:
+- Probes Hermes **API server** `GET /health` every 60 seconds.
+- Sends a Telegram `sendMessage` alert to **TELEGRAM_OWNER_ID only** after three
+  consecutive failures, and **one** recovery notification after `{"status":"ok"}`.
+- Does **not** use `getUpdates`, `setWebhook`, or Telegram polling: existing bots unaffected.
+- `GATEWAY_ALERT_INTERVAL` may be configured between 15 and 3600 seconds.
+- Can detect API server failures **only while this Mini App backend is running**.
+  If the entire Windows PC, local network or alert process fails, it cannot
+  notify you. Use an independent uptime monitor for host-offline notifications.
+
+The health endpoint is a liveness probe, not a guarantee that the Telegram
+gateway channel or all Hermes tools are functioning. To monitor those, add
+an authenticated gateway readiness probe in a subsequent release.
 
 ## Validation
 

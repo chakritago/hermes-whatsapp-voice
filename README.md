@@ -228,7 +228,7 @@ modify the existing WhatsApp linked-device implementation.
 - Backend and Mini App: telegram_miniapp/server.py and telegram_miniapp/web/index.html
 - Owner-only Telegram initData verification, Gemini Live audio relay, Hermes ask_hermes tool
 - Installation, HTTPS proxy and configuration: [Telegram Mini App guide](docs/telegram-miniapp.md)
-- GitHub Actions runs offline tests on Windows and Linux.
+- GitHub Actions runs offline tests on Windows and Linux. Includes Gemini reconnect + short-lived session recovery, Gateway health alerts, animated waveform and speaker/mic controls.
 
 **Important:** Telegram Mini App voice chat is not a native Telegram phone call.
 The app requires a publicly reachable HTTPS URL and your own Telegram bot,

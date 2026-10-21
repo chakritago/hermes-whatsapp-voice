@@ -25,3 +25,4 @@ jobs:
       - run: ruff check telegram_miniapp tests/test_telegram_miniapp.py
       - run: ruff format --check telegram_miniapp tests/test_telegram_miniapp.py
       - run: python -m pytest tests/test_telegram_miniapp.py -q
+      - run: node --check telegram_miniapp/web/app.js
