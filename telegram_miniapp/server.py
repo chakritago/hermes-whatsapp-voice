@@ -394,7 +394,7 @@ async def voice_session(
                         approval_id, future = approvals.new(question)
                         await ws.send_json({
                             "type": "approval_request", "id": approval_id,
-                            "request": question[:2000], "expires_seconds": 45,
+                            "request": question[:4000], "expires_seconds": 45,
                         })
                         allowed = await approvals.wait(approval_id, future)
                     except RuntimeError:

@@ -44,9 +44,11 @@ let active = false, desired = false, muted = false, audioInitializing = false;
 let playAt = 0, playing = [], reconnectCount = 0, reconnectTimer = null;
 let resumeTicket = null, waveFrame = null, waveMode = "bars", connectionSequence = 0;
 let readyAt = 0, diagnosticsTimer = null, nextPing = 0, currentApproval = null;
+let approvalTimer = null;
 let recoveringMic = false, lastMicLevel = 0;
 const bufferController = new window.HermesAdaptiveBuffer();
 function clearApproval() {
+  clearTimeout(approvalTimer); approvalTimer = null;
   currentApproval = null;
   approvalPanel.hidden = true;
   approveButton.disabled = denyButton.disabled = false;
@@ -433,6 +435,13 @@ function connectSocket() {
         currentApproval = msg.id;
         approvalText.textContent = msg.request;
         approvalPanel.hidden = false;
+        const requestId = currentApproval;
+        approvalTimer = setTimeout(() => {
+          if (currentApproval === requestId) {
+            clearApproval();
+            description.textContent = "คำขออนุมัติหมดอายุแล้ว ไม่ได้สั่งงาน Hermes";
+          }
+        }, Math.min(45, Math.max(1, Number(msg.expires_seconds) || 45)) * 1000);
         state("รอคำอนุมัติ", false, "approval");
         // Approval is never triggered by speech, only a real UI click.
       }

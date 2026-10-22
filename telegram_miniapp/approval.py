@@ -13,7 +13,7 @@ import secrets
 from dataclasses import dataclass
 
 APPROVAL_TIMEOUT_SECONDS = 45
-MAX_PENDING = 2
+MAX_PENDING = 1
 
 
 @dataclass
@@ -44,7 +44,7 @@ class ApprovalGate:
     async def wait(self, token: str, future: asyncio.Future[bool]) -> bool:
         try:
             return await asyncio.wait_for(future, timeout=APPROVAL_TIMEOUT_SECONDS)
-        except (TimeoutError, asyncio.CancelledError):
+        except TimeoutError:
             return False
         finally:
             self.pending.pop(token, None)
