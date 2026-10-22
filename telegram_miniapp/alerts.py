@@ -114,6 +114,10 @@ MESSAGES = {
     "down": "🔴 Hermes Gateway: API readiness ไม่ผ่านต่อเนื่อง 3 ครั้ง กรุณาตรวจสอบ",
     "recovered": "🟢 Hermes Gateway: API readiness กลับมาทำงานแล้ว",
 }
+EXTERNAL_MESSAGES = {
+    "down": "🔴 External Monitor: ติดต่อ Hermes Windows Endpoint ไม่ได้ต่อเนื่อง (เครื่อง/เครือข่าย/HTTPS อาจมีปัญหา)",
+    "recovered": "🟢 External Monitor: Hermes Windows Endpoint กลับมาตอบสนองแล้ว",
+}
 
 
 async def probe_gateway(session: ClientSession, url: str) -> bool:
@@ -162,7 +166,8 @@ async def drain_queue(queue: AlertQueue, session: ClientSession, config, *, now:
     if pending.next_attempt_at > now:
         return False
     successful, retry = await deliver_alert(
-        session, config.bot_token, config.owner_id, MESSAGES[pending.event],
+        session, config.bot_token, config.owner_id,
+        (EXTERNAL_MESSAGES if getattr(config, "external", False) else MESSAGES)[pending.event],
     )
     if successful:
         queue.acknowledge()

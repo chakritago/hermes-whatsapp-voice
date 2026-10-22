@@ -168,7 +168,15 @@ function playback(bytes) {
     }
   };
   const schedule = bufferController.nextTime(audio.currentTime, playAt, buffer.duration);
-  if (schedule.drop) { node.disconnect(); return; }
+  if (schedule.drop) {
+    node.disconnect();
+    if (!playing.length) {
+      hermesStatus.textContent = "Hermes พร้อมตอบ";
+      orb.dataset.speaking = "false";
+      moodText.textContent = "กำลังฟัง";
+    }
+    return;
+  }
   const when = schedule.when;
   node.start(when);
   playAt = when + buffer.duration;

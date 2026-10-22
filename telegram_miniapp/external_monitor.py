@@ -27,6 +27,7 @@ class MonitorConfig:
     token: str
     owner_id: int
     interval: int = 60
+    external: bool = True
 
     @classmethod
     def from_env(cls) -> MonitorConfig:
