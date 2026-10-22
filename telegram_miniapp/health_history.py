@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import time
 from collections import deque
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 
 class HealthHistory:
@@ -29,7 +29,7 @@ class HealthHistory:
             raise ValueError("period must be hour/day")
         buckets: dict[str, dict] = {}
         for sample in self.samples:
-            day = datetime.fromtimestamp(sample["at"], tz=timezone.utc)
+            day = datetime.fromtimestamp(sample["at"], tz=UTC)
             key = day.strftime("%Y-%m-%dT%H:00Z" if period == "hour" else "%Y-%m-%d")
             slot = buckets.setdefault(key, {
                 "period": key, "count": 0, "ready": 0, "api": 0,

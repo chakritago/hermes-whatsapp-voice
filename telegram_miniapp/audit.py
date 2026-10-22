@@ -43,7 +43,7 @@ class ApprovalAudit:
                     if row.get("risk") not in {"review", "medium", "high"}:
                         raise ValueError("Invalid audit risk")
                     if not isinstance(row.get("request_tag"), str):
-                        raise ValueError("Invalid audit request tag")
+                        raise TypeError("Invalid audit request tag")
                     seal = row.get("seal")
                     if seal is None:
                         # Legacy unsealed records remain readable. The first sealed
