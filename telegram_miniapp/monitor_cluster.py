@@ -5,6 +5,7 @@ and a shared state key prevents repeating an unchanged down/up event.
 If Redis is unavailable, multi-replica monitors fail closed for alerts.
 As with any external message API, exactly-once delivery cannot be guaranteed.
 """
+
 from __future__ import annotations
 
 import logging
