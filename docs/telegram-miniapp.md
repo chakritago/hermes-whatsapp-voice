@@ -244,3 +244,38 @@ PCM, adaptive buffer, and dashboard boot/DOM sanity. **Still required before
 production:** physical Windows service install/reboot and credential access under
 restricted account; actual second-machine outage simulation; live Telegram
 Mini App approval on mobile/desktop; real Gemini audio latency and device hot-swap.
+
+
+## R5 — Release hardening and owner interaction (Draft)
+
+### Windows Service Release Gate
+CI on Windows uses tests/test_windows_release_sim.ps1 with a temporary isolated project fixture and mocked service cmdlets/HTTP readiness.
+It verifies backup, dry-run, simulated restart, rollback and post-rollback verification. NO real Windows Service is installed or rebooted in CI.
+Secrets, dependencies and Windows service account passwords are not backed up. Physical Windows deployment/reboot/restore remains mandatory before merge.
+
+### Tool policy and approval audit
+Every Hermes tool request is labelled advisory high / medium / review. ALL levels require owner tap approval in Mini App; no spoken approval bypass.
+The Mini App shows the exact request (max 4000 characters) and 45-second expiry. Audit recording must succeed before a tool is submitted.
+Audit stores only timestamp, risk, decision and keyed HMAC tag of request, never request text, credentials, transcript or initData.
+Default is a service-user-local approvals.jsonl; HERMES_APPROVAL_AUDIT_FILE overrides path. Set restrictive NTFS ACLs. Corrupt/unwritable logs block tool execution.
+Audit is not tamper-proof. History is visible only through the owner's authenticated WebSocket.
+
+### External failover
+HERMES_MONITOR_URLS accepts semicolon-separated public HTTPS origins. Any healthy origin keeps the service marked available; no seamless voice-call rerouting is implied.
+Single monitor runs without Redis. For multiple replicas set HERMES_MONITOR_REPLICAS=2, install telegram_miniapp/requirements-monitor.txt and configure the SAME shared HERMES_MONITOR_REDIS_URL and HERMES_MONITOR_CLUSTER_KEY across hosts.
+A Redis leader lease elects one active monitor and shared state suppresses repeated unchanged alerts. When Redis is unavailable, replicated monitors fail closed.
+Exactly-once Telegram delivery is NOT guaranteed across crashes or lost Bot API acknowledgements. A transactional shared queue would be required for strict guarantees.
+
+### UI, UX and Session Recovery 3.0
+Owner-only WebSocket health samples power a bounded in-memory uptime/health chart, estimated ready percentage and latest status-transition timeline.
+High Contrast, Compact layout and 3 font sizes are accessible and persisted locally where Telegram WebView supports localStorage.
+Uplink buffering is bounded by RTT/jitter; playback scheduling is adaptive but does not change Gemini's codec/bitrate.
+Input and output device selectors have permission-based fallback. Device hot-swap remains best effort.
+SessionStorage keeps an owner-bound short-lived recovery ticket for approximately 110 seconds, never a Gemini handle or API key.
+Recovery requires explicit button click and new microphone permission. Telegram initData is revalidated on reconnect. Backend restart invalidates tickets.
+User-initiated End clears ticket. On page close the microphone is stopped and the recovery ticket may remain temporarily.
+
+### Not validated by CI
+Physical Windows reboot without login; actual service account setup; physical backup/rollback and service restart;
+two real monitor hosts plus shared Redis; Telegram mobile WebView approval and accessibility;
+live Gemini audio and device hot swap. PR must remain Draft and must not be merged before these gates pass.

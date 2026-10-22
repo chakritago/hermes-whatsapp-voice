@@ -237,3 +237,7 @@ Gemini key and enabled Hermes API server. The original WhatsApp calls remain ava
 ## R4: External Uptime, owner tool approval and release hardening
 
 This optional Telegram integration now includes an independent external HTTPS uptime monitor, a fail-closed *per-tool* approval button in Telegram Mini App before Hermes can execute, a dry-run-first Windows Service release gate with source/config metadata snapshots and rollback, live RTT/audio buffer diagnostics, an adaptive playback queue and audio device hot-swap recovery. All existing WhatsApp features remain intact. See [full R4 setup and limitations](docs/telegram-miniapp.md).
+
+### R5 (Draft)
+
+Added Windows Service Release simulation in CI, Hermes risk approval and privacy-preserving audit, Redis-based external monitor coordination, owner-only health dashboards, accessibility controls, advanced audio input selection, network-aware buffering and opt-in short-lived session recovery. See [R5 setup and release limitations](docs/telegram-miniapp.md). Physical tests pending.

@@ -17,6 +17,7 @@ from pathlib import Path
 from aiohttp import ClientError, ClientSession, ClientTimeout
 
 from .readiness import HealthSnapshot, check_readiness
+from .health_history import HealthHistory
 
 LOG = logging.getLogger("hermes.telegram_alerts")
 MAX_QUEUED = 50
@@ -184,7 +185,7 @@ def alert_queue_path() -> Path:
     return base / "HermesTelegramVoice" / "gateway-alerts.json"
 
 
-async def gateway_watch(config, *, interval: float | None = None, snapshot: HealthSnapshot | None = None) -> None:
+async def gateway_watch(config, *, interval: float | None = None, snapshot: HealthSnapshot | None = None, history: HealthHistory | None = None) -> None:
     """Probe readiness, retry alerts without spamming or replacing Telegram webhook.
 
     Runs in the Mini App backend process; cannot alert if the whole host is offline.
@@ -203,6 +204,9 @@ async def gateway_watch(config, *, interval: float | None = None, snapshot: Heal
             try:
                 readiness = await check_readiness(session, config)
                 snapshot.last = readiness
+                if history is not None:
+                    history.add(api=readiness.api, capabilities=readiness.capabilities,
+                                telegram=readiness.telegram)
                 event = state.observe(readiness.gateway_ready, now=time.monotonic())
                 if event:
                     queue.enqueue(event)

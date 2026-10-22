@@ -23,6 +23,9 @@ from aiohttp import ClientError, ClientSession, ClientTimeout, WSMsgType, web
 
 from .alerts import gateway_watch
 from .approval import ApprovalGate
+from .approval_policy import classify_request
+from .audit import ApprovalAudit, audit_path
+from .health_history import HealthHistory
 from .readiness import HealthSnapshot
 from .recovery import Recovery, RecoveryStore, resume_setup, update_handle
 
@@ -287,7 +290,7 @@ async def socket_handler(request: web.Request) -> web.StreamResponse:
     ticket, recovery, restored = tickets.acquire(user["id"], auth.get("resume_ticket"))
     stopped = False
     try:
-        stopped = await voice_session(ws, config, user, ticket, recovery, restored)
+        stopped = await voice_session(ws, config, user, ticket, recovery, restored, request.app["approval_audit"], request.app["health_history"])
     finally:
         tickets.release(ticket, stopped=stopped)
         lock.release()
@@ -302,6 +305,8 @@ async def voice_session(
     ticket: str,
     recovery: Recovery,
     restored: bool,
+    audit_log: ApprovalAudit,
+    health_history: HealthHistory,
 ) -> bool:
     """Bridge one browser socket; a short-lived recovery ticket survives disconnects.
 
@@ -311,6 +316,7 @@ async def voice_session(
     stopped = False
     tasks: dict[str, asyncio.Task] = {}
     approvals = ApprovalGate()
+    audit: ApprovalAudit = audit_log
     send_lock = asyncio.Lock()
     current: dict = {"upstream": None}
     loop = asyncio.get_running_loop()
@@ -374,6 +380,10 @@ async def voice_session(
                         token, allow = data.get("id"), data.get("allow")
                         if isinstance(token, str) and isinstance(allow, bool):
                             approvals.resolve(token, allow)
+                    elif data.get("type") == "approval_history":
+                        await ws.send_json({"type": "approval_history", "rows": audit.history()})
+                    elif data.get("type") == "health_history":
+                        await ws.send_json({"type": "health_history", **health_history.snapshot()})
                     elif data.get("type") == "ping":
                         marker = data.get("id")
                         if isinstance(marker, int) and 0 <= marker <= 2147483647:
@@ -386,23 +396,37 @@ async def voice_session(
             name = call.get("name", "")
             args = call.get("args") or {}
             if name == "ask_hermes" and isinstance(args, dict):
-                question = str(args.get("request", "")).strip()
+                question = str(args.get("request", "")).strip()[:4000]
                 if not question:
                     result = "Empty Hermes request."
                 else:
+                    risk = classify_request(question)
+                    allowed = False
+                    record_ok = True
                     try:
+                        audit.append("requested", risk.level, question)
                         approval_id, future = approvals.new(question)
                         await ws.send_json({
                             "type": "approval_request", "id": approval_id,
-                            "request": question[:4000], "expires_seconds": 45,
+                            "request": question,
+                            "risk": risk.level,
+                            "reason": risk.reason,
+                            "expires_seconds": 45,
                         })
                         allowed = await approvals.wait(approval_id, future)
-                    except RuntimeError:
+                        audit.append("approved" if allowed else "denied", risk.level, question)
+                    except (RuntimeError, OSError, ValueError):
+                        LOG.warning("Approval audit/unavailable: Hermes tool not executed")
+                        record_ok = False
                         allowed = False
+                    # A failed audit MUST block the action, even if the owner clicked approve.
                     result = (
                         await run_hermes(session, config, question, recovery.hermes_session)
-                        if allowed else "Hermes tool request denied or timed out. No action executed."
+                        if allowed and record_ok else
+                        "Hermes tool request denied, expired or could not be audited. No action executed."
                     )
+                    if not ws.closed:
+                        await ws.send_json({"type": "approval_history", "rows": audit.history()})
             else:
                 result = "Unknown tool."
             await send_upstream({
@@ -541,7 +565,7 @@ async def voice_session(
 async def on_startup(app: web.Application) -> None:
     config: Config = app["config"]
     if config.alerts_enabled:
-        app["alert_task"] = asyncio.create_task(gateway_watch(config, snapshot=app["readiness_snapshot"]))
+        app["alert_task"] = asyncio.create_task(gateway_watch(config, snapshot=app["readiness_snapshot"], history=app["health_history"]))
 
 
 async def on_cleanup(app: web.Application) -> None:
@@ -557,6 +581,8 @@ def create_app(config: Config) -> web.Application:
     app["call_lock"] = asyncio.Lock()
     app["recoveries"] = RecoveryStore()
     app["readiness_snapshot"] = HealthSnapshot()
+    app["health_history"] = HealthHistory()
+    app["approval_audit"] = ApprovalAudit(audit_path(), config.hermes_key)
     app.router.add_get("/", index)
     app.router.add_get("/app.js", script)
     app.router.add_get("/audio-worklet.js", audio_worklet)

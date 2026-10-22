@@ -15,6 +15,10 @@ const preflightResult = byId("preflightResult"), themeButton = byId("themeToggle
 const diagRtt = byId("diagRtt"), diagBuffer = byId("diagBuffer"), diagMic = byId("diagMic");
 const diagQuality = byId("diagQuality"), diagDrop = byId("diagDrop"), approvalPanel = byId("approvalPanel");
 const approvalText = byId("approvalText"), approveButton = byId("approveAction");
+const riskText = byId("approvalRisk"), approvalHistory = byId("approvalHistory");
+const healthChart = byId("healthChart"), healthInfo = byId("healthInfo"), healthTimeline = byId("healthTimeline");
+const micSelect = byId("micSelect"), micRow = byId("micRow"), resumeButton = byId("resumeSession");
+const contrastToggle = byId("contrastToggle"), compactToggle = byId("compactToggle"), fontToggle = byId("fontToggle");
 const denyButton = byId("denyAction"), moodText = byId("moodText");
 const reconnectInfo = byId("reconnectInfo");
 const speakerAudio = byId("speakerAudio");
@@ -45,6 +49,75 @@ let playAt = 0, playing = [], reconnectCount = 0, reconnectTimer = null;
 let resumeTicket = null, waveFrame = null, waveMode = "bars", connectionSequence = 0;
 let readyAt = 0, diagnosticsTimer = null, nextPing = 0, currentApproval = null;
 let approvalTimer = null;
+const SESSION_KEY = "hermes.voice.recovery.v3";
+function savedRecovery() {
+  try {
+    const item = JSON.parse(sessionStorage.getItem(SESSION_KEY) || "null");
+    if (item && typeof item.ticket === "string" && item.expires > Date.now() && item.ticket.length <= 128) return item.ticket;
+  } catch { /* storage unavailable */ }
+  return null;
+}
+function preserveRecovery() {
+  if (!resumeTicket) return;
+  try { sessionStorage.setItem(SESSION_KEY, JSON.stringify({ticket:resumeTicket, expires:Date.now()+110000})); }
+  catch { /* WebView storage unavailable */ }
+}
+function discardRecovery() {
+  try { sessionStorage.removeItem(SESSION_KEY); } catch { /* unavailable */ }
+}
+function setViewOption(name, value) {
+  document.documentElement.dataset[name] = value;
+  try { localStorage.setItem("hermes.voice."+name, value); } catch { /* unavailable */ }
+}
+for (const [name, button, values] of [
+  ["contrast", contrastToggle, ["normal", "high"]],
+  ["density", compactToggle, ["normal", "compact"]],
+  ["font", fontToggle, ["normal", "large", "extra"]]
+]) {
+  let selected = values[0];
+  try { selected = localStorage.getItem("hermes.voice."+name) || selected; } catch { /* unavailable */ }
+  if (!values.includes(selected)) selected = values[0];
+  setViewOption(name, selected);
+  button.addEventListener("click", () => {
+    selected = values[(values.indexOf(selected)+1) % values.length];
+    setViewOption(name, selected);
+    button.setAttribute("aria-label", name + ": " + selected);
+    button.setAttribute("aria-pressed", selected === values[0] ? "false" : "true");
+  });
+}
+function displayAudit(rows) {
+  approvalHistory.replaceChildren();
+  for (const item of (Array.isArray(rows) ? rows.slice(-14).reverse() : [])) {
+    const line = document.createElement("li");
+    const when = new Date(item.at * 1000).toLocaleString("th-TH");
+    line.textContent = when + " · " + item.risk + " · " + item.decision + " · #" + item.request_tag?.slice(0,8);
+    approvalHistory.appendChild(line);
+  }
+}
+function displayHealth(packet) {
+  const samples = Array.isArray(packet.samples) ? packet.samples.slice(-144) : [];
+  const pct = packet.ready_percent;
+  healthInfo.textContent = pct == null ? "ยังไม่มีข้อมูล" :
+    "พร้อมทำงาน " + pct + "% จาก " + packet.total_samples + " ตัวอย่าง · เปลี่ยนสถานะ " + packet.transitions + " ครั้ง";
+  const ctx = healthChart.getContext("2d"), w = healthChart.width, h = healthChart.height;
+  ctx.clearRect(0,0,w,h);
+  ctx.fillStyle = "#40536e";ctx.fillRect(0,h-1,w,1);
+  if (!samples.length) return;
+  const width = w / samples.length;
+  samples.forEach((item,i) => {
+    ctx.fillStyle = item.ready ? "#40cba3" : "#f09b80";
+    ctx.fillRect(i*width, item.ready ? h*.15 : h*.6, Math.max(1,width-.5),item.ready ? h*.85 : h*.4);
+  });
+  healthTimeline.replaceChildren();
+  for (let i=samples.length-1;i>=0 && healthTimeline.children.length<8;i--) {
+    if (i>0 && samples[i].ready === samples[i-1].ready) continue;
+    const line = document.createElement("li");
+    line.textContent = new Date(samples[i].at*1000).toLocaleString("th-TH")+" · "+
+      (samples[i].ready ? "พร้อมใช้งาน" : "ขัดข้อง/ไม่พร้อม");
+    healthTimeline.appendChild(line);
+  }
+}
+if (savedRecovery()) resumeButton.hidden = false;
 let recoveringMic = false, lastMicLevel = 0;
 const bufferController = new window.HermesAdaptiveBuffer();
 function clearApproval() {
@@ -59,6 +132,7 @@ function respondApproval(allow) {
     type: "approval", id: currentApproval, allow
   }));
   clearApproval();
+  if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({type:"approval_history"}));
   if (!allow) description.textContent = "ปฏิเสธคำสั่ง Hermes แล้ว";
 }
 approveButton.addEventListener("click", () => respondApproval(true));
@@ -77,6 +151,10 @@ function startDiagnostics() {
     diagQuality.textContent = bufferController.rtt < 200 ? "ดี" :
       bufferController.rtt < 600 ? "ปานกลาง" : "เครือข่ายช้า";
     diagDrop.textContent = String(bufferController.underruns + bufferController.drops);
+    if (bufferController.rtt > 700 || socket.bufferedAmount > 140000) {
+      diagQuality.textContent = "ความหน่วงสูง · กำลังลด Buffer";
+    }
+    if (nextPing % 10 === 0) socket.send(JSON.stringify({type:"health_history"}));
   }, 1500);
 }
 const pendingPings = new Map();
@@ -199,6 +277,17 @@ function toPcm16(samples, sampleRate) {
   return bytes;
 }
 async function refreshOutputs() {
+  try {
+    const all = await navigator.mediaDevices.enumerateDevices();
+    const old = micSelect.value;
+    micSelect.replaceChildren();
+    micSelect.add(new Option("ไมค์เริ่มต้น", "default"));
+    for (const mic of all.filter(d => d.kind === "audioinput" && d.deviceId && d.deviceId !== "default")) {
+      micSelect.add(new Option(mic.label || "ไมโครโฟน", mic.deviceId));
+    }
+    if ([...micSelect.options].some(item => item.value === old)) micSelect.value = old;
+    micRow.hidden = all.filter(d=>d.kind === "audioinput").length === 0;
+  } catch { micRow.hidden = true; }
   if (!("setSinkId" in speakerAudio) || !navigator.mediaDevices.enumerateDevices) {
     outputRow.hidden = true; return;
   }
@@ -218,6 +307,27 @@ async function refreshOutputs() {
     outputRow.hidden = false;
   } catch { outputRow.hidden = true; }
 }
+micSelect.addEventListener("change", async () => {
+  if (!audio || !stream || !desired) return;
+  try {
+    const id = micSelect.value;
+    const next = await navigator.mediaDevices.getUserMedia({
+      audio: {deviceId:id==="default"?undefined:{exact:id},
+        echoCancellation:true, noiseSuppression:true, autoGainControl:true}, video:false
+    });
+    const newSource = audio.createMediaStreamSource(next);
+    newSource.connect(analyser);
+    const oldStream = stream;
+    source?.disconnect();
+    source = newSource; stream = next;
+    oldStream.getAudioTracks().forEach(t=>t.stop());
+    next.getAudioTracks().forEach(t=>{t.onended=recoverAudioDevice;});
+    syncMute();
+    description.textContent = "สลับไมโครโฟนแล้ว";
+  } catch {
+    description.textContent = "เปลี่ยนไมโครโฟนไม่สำเร็จ โปรดตรวจสิทธิ์อุปกรณ์";
+  }
+});
 outputSelect.addEventListener("change", async () => {
   try {
     await speakerAudio.setSinkId(outputSelect.value);
@@ -249,7 +359,7 @@ async function initializeAudio() {
         workletNode = new AudioWorkletNode(audio, "hermes-mic", {numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1]});
         workletNode.port.onmessage = event => {
           if (!muted && active && desired && socket?.readyState === WebSocket.OPEN &&
-              socket.bufferedAmount < 262144 && event.data instanceof ArrayBuffer) {
+              socket.bufferedAmount < bufferController.uplinkLimit() && event.data instanceof ArrayBuffer) {
             socket.send(event.data);
           }
         };
@@ -263,7 +373,7 @@ async function initializeAudio() {
       processor.connect(silentGain);
       processor.onaudioprocess = event => {
         if (!muted && desired && active && socket?.readyState === WebSocket.OPEN &&
-            socket.bufferedAmount < 262144) {
+            socket.bufferedAmount < bufferController.uplinkLimit()) {
           socket.send(toPcm16(event.inputBuffer.getChannelData(0), audio.sampleRate));
         }
       };
@@ -416,6 +526,12 @@ function connectSocket() {
         if (!stream) throw new Error("no microphone permission");
         if (generation !== connectionSequence || !desired) return;
         resumeTicket = msg.resume_ticket || null;
+        preserveRecovery();
+        resumeButton.hidden = true;
+        if (socket?.readyState === WebSocket.OPEN) {
+          socket.send(JSON.stringify({type:"approval_history"}));
+          socket.send(JSON.stringify({type:"health_history"}));
+        }
         readyAt = Date.now(); active = true; syncMute();
         start.disabled = true; end.disabled = false; mute.disabled = false;
         state(msg.restored ? "กู้คืนการสนทนาสำเร็จ" : "กำลังสนทนา", true, "connected");
@@ -437,11 +553,17 @@ function connectSocket() {
         pendingPings.delete(msg.id);
         bufferController.observeRtt(performance.now() - started);
       }
+    } else if (msg.type === "approval_history") {
+      displayAudit(msg.rows);
+    } else if (msg.type === "health_history") {
+      displayHealth(msg);
     } else if (msg.type === "approval_request") {
       if (typeof msg.id === "string" && typeof msg.request === "string") {
         clearApproval();
         currentApproval = msg.id;
         approvalText.textContent = msg.request;
+        riskText.textContent = "ระดับความเสี่ยง: " + (msg.risk || "review") + " · " + (msg.reason || "ตรวจคำสั่งก่อนดำเนินการ");
+        riskText.dataset.risk = msg.risk || "review";
         approvalPanel.hidden = false;
         const requestId = currentApproval;
         approvalTimer = setTimeout(() => {
@@ -481,7 +603,8 @@ async function stop(explicit = true) {
   const old = socket; socket = null;
   if (old?.readyState === WebSocket.OPEN && explicit) old.send(JSON.stringify({type: "stop"}));
   if (old && old.readyState <= WebSocket.OPEN) old.close();
-  if (explicit) resumeTicket = null;
+  if (explicit) { resumeTicket = null; discardRecovery(); resumeButton.hidden = true; }
+  else { preserveRecovery(); resumeButton.hidden = !savedRecovery(); }
   await disposeAudio();
   start.disabled = !(tg?.initData && window.isSecureContext);
   end.disabled = true; mute.disabled = true;
@@ -532,9 +655,11 @@ async function audioPreflight() {
 }
 preflightButton.addEventListener("click", audioPreflight);
 
-start.addEventListener("click", async () => {
+async function beginSession(restore = false) {
   if (!tg?.initData || !window.isSecureContext || desired) return;
-  desired = true; reconnectCount = 0; resumeTicket = null;
+  desired = true; reconnectCount = 0; resumeTicket = restore ? savedRecovery() : null;
+  if (!restore) discardRecovery();
+  resumeButton.hidden = true;
   start.disabled = true; end.disabled = false; mute.disabled = false;
   state("ขออนุญาตไมโครโฟน...", false, "connecting");
   try {
@@ -546,9 +671,14 @@ start.addEventListener("click", async () => {
     await stop(false);
     description.textContent = "โปรดอนุญาตไมโครโฟนใน Telegram แล้วลองอีกครั้ง";
   }
-});
+}
+start.addEventListener("click", () => { beginSession(false); });
+resumeButton.addEventListener("click", () => { beginSession(true); });
 end.addEventListener("click", () => { stop(true); });
-window.addEventListener("pagehide", () => { stop(true); });
+window.addEventListener("pagehide", () => {
+  preserveRecovery();
+  stop(false); // Page unload never silently revokes recoverable owner session.
+});
 if (!tg?.initData || !window.isSecureContext) {
   start.disabled = true;
   description.textContent = "เปิดจากเมนู Telegram Bot ผ่าน HTTPS เพื่อเริ่มสนทนา";

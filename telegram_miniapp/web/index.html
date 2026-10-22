@@ -138,6 +138,37 @@ main{gap:18px;padding-top:24px}
 #approveAction{background:#216f56;color:white}
 @media(max-width:500px){.diagnostics{grid-template-columns:repeat(3,minmax(0,1fr))}.diagnostics div{padding:8px 5px}}
 @media(prefers-reduced-motion:reduce){.orb-wrap[data-mood] .orb{transition:none}}
+
+.access-bar{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+.access-bar button{flex:1;min-width:115px;padding:10px 7px;font-size:13px;background:var(--card);color:var(--text);border:1px solid var(--line)}
+:root[data-contrast="high"]{--text:#fff;--muted:#e9eef8;--card:#071018;--card-alt:#142033;--line:#f6e69c;--button:#f7e27c}
+:root[data-contrast="high"][data-theme="light"]{--text:#000;--muted:#121212;--card:#fff;--card-alt:#f1f1f1;--line:#000;--button:#ffe857}
+:root[data-font="large"]{font-size:19px}
+:root[data-font="extra"]{font-size:22px}
+:root[data-font="large"] button,:root[data-font="extra"] button{font-size:1rem}
+:root[data-font="large"] .description,:root[data-font="extra"] .description{font-size:1rem}
+:root[data-density="compact"] main{padding:10px 0;gap:10px}
+:root[data-density="compact"] .orb-wrap{height:100px;width:100px}
+:root[data-density="compact"] .orb{height:75px;width:75px}
+:root[data-density="compact"] .conversation{min-height:90px;padding:12px}
+.actions button[hidden]{display:none}
+.controls{align-items:stretch}
+.controls label{min-width:200px;flex:1 1 200px}
+#micRow[hidden],#outputRow[hidden]{display:none}
+.controls label select{max-width:100%;width:100%}
+.health,.audit-center{width:100%;border:1px solid var(--line);background:var(--card);
+ border-radius:17px;padding:15px;color:var(--text)}
+.health h3,.audit-center h3{font-size:17px;margin:0 0 8px}
+.health h4{font-size:13px;margin:10px 0 6px}
+.health p,.audit-center p{font-size:13px;line-height:1.6;color:var(--muted)}
+.health canvas{width:100%;height:105px;display:block;border-bottom:1px solid var(--line)}
+.health ol,.audit-center ol{list-style:none;padding:0;margin:8px 0 0;max-height:150px;overflow:auto}
+.health li,.audit-center li{padding:6px 0;border-bottom:1px solid var(--line);font-size:12px;line-height:1.5;overflow-wrap:anywhere}
+.risk-badge{font-weight:700;color:var(--text)}
+.risk-badge[data-risk="high"]{color:#ffb4a2}
+.risk-badge[data-risk="medium"]{color:#e7ce84}
+@media(max-width:420px){.access-bar button{min-width:0;font-size:12px}.controls label{min-width:100%}
+  .shell{padding:14px 11px 20px}.dual-waves{grid-template-columns:1fr 1fr}}
 </style>
 </head>
 <body>
@@ -147,6 +178,11 @@ main{gap:18px;padding-top:24px}
   <div class="brand"><h1>Hermes Voice</h1><p>TELEGRAM · GEMINI LIVE</p></div>
   <button type="button" id="themeToggle" aria-label="เปลี่ยนธีม">◐ อัตโนมัติ</button>
 </header>
+<div class="access-bar" role="group" aria-label="การตั้งค่าการแสดงผล">
+  <button type="button" id="fontToggle" aria-pressed="false">ก+ ขนาดตัวอักษร</button>
+  <button type="button" id="contrastToggle" aria-pressed="false">◐ High Contrast</button>
+  <button type="button" id="compactToggle" aria-pressed="false">▤ Compact</button>
+</div>
 <main>
 <div id="status" class="pill" role="status" aria-live="polite"><span class="dot"></span><span id="statusText">พร้อมเริ่มสนทนา</span></div>
 <div id="orb" class="orb-wrap">
@@ -168,9 +204,14 @@ main{gap:18px;padding-top:24px}
   <button type="button" id="preflight">✓ ตรวจสอบไมโครโฟนและลำโพง</button>
   <p id="preflightResult" role="status" aria-live="polite">แนะนำให้ตรวจอุปกรณ์ก่อนเริ่มสนทนา</p>
 </div>
-<div class="actions"><button type="button" id="start">🎙 เริ่มสนทนา</button><button type="button" id="end" disabled>วางสาย</button></div>
+<div class="actions">
+  <button type="button" id="start">🎙 เริ่มสนทนา</button>
+  <button type="button" id="resumeSession" hidden>↺ กู้คืนการสนทนา</button>
+  <button type="button" id="end" disabled>วางสาย</button>
+</div>
 <div class="controls">
   <button type="button" id="mute" disabled aria-pressed="false">🎙 ปิดไมค์</button>
+  <label id="micRow" hidden>ไมโครโฟน <select id="micSelect" aria-label="เลือกไมโครโฟน"><option value="default">ไมค์เริ่มต้น</option></select></label>
   <label id="outputRow" hidden>ลำโพง <select id="outputSelect" aria-label="เลือกอุปกรณ์เสียง"><option value="default">ลำโพงเริ่มต้น</option></select></label>
 </div>
 <p id="reconnectInfo" role="status" aria-live="polite"></p>
@@ -184,11 +225,22 @@ main{gap:18px;padding-top:24px}
 <section id="approvalPanel" class="approval" role="alertdialog" aria-labelledby="approvalHeading" aria-describedby="approvalText" hidden>
   <h3 id="approvalHeading">ยืนยันคำสั่ง Hermes</h3>
   <p>ตรวจสอบคำสั่งก่อนอนุญาต AI ใช้เครื่องมือ คำสั่งจะไม่ทำงานหากไม่กดอนุมัติภายใน 45 วินาที</p>
+  <p id="approvalRisk" class="risk-badge" role="status">โปรดตรวจคำสั่ง</p>
   <blockquote id="approvalText"></blockquote>
   <div class="approval-buttons">
     <button type="button" id="denyAction">ปฏิเสธ</button>
     <button type="button" id="approveAction">อนุมัติครั้งนี้</button>
   </div>
+</section>
+<section class="health" aria-label="Gateway Uptime and Readiness" id="healthDashboard">
+ <h3>Gateway Uptime & Health</h3>
+ <p id="healthInfo" role="status">รอข้อมูลจาก Gateway</p>
+ <canvas id="healthChart" width="480" height="105" role="img" aria-label="กราฟสถานะ Gateway ย้อนหลัง สีเขียวพร้อมใช้งาน สีส้มไม่พร้อม"></canvas>
+ <h4>เหตุการณ์ล่าสุด</h4><ol id="healthTimeline"></ol>
+</section>
+<section class="audit-center" aria-label="ประวัติอนุมัติคำสั่ง">
+ <h3>Approval Center</h3><p>เก็บเฉพาะผลการตัดสินใจ ระดับความเสี่ยง และรหัสอ้างอิง ไม่เก็บข้อความคำสั่งใน Audit</p>
+ <ol id="approvalHistory"></ol>
 </section>
 <audio id="speakerAudio" autoplay playsinline hidden></audio>
 <section class="conversation" aria-label="บทสนทนา"><h3>บทสนทนา</h3><div id="transcript" aria-live="polite"><p class="empty">ข้อความจากบทสนทนาจะปรากฏที่นี่</p></div></section>

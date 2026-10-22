@@ -14,6 +14,11 @@
       this.jitter = this.jitter * 0.8 + delta * 0.2;
       this.rtt = this.rtt * 0.8 + ms * 0.2;
     }
+    uplinkLimit() {
+      // Do not let the microphone queue grow without bound during network loss.
+      return this.rtt > 700 || this.jitter > 300 ? 65536 :
+        this.rtt > 350 || this.jitter > 150 ? 131072 : 262144;
+    }
     delaySeconds() {
       return Math.max(0.045, Math.min(0.25, (this.jitter * 1.5 + this.rtt * 0.13 + 35) / 1000));
     }
