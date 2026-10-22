@@ -22,6 +22,7 @@ from urllib.parse import parse_qsl, urlparse
 from aiohttp import ClientError, ClientSession, ClientTimeout, WSMsgType, web
 
 from .alerts import gateway_watch
+from .approval import ApprovalGate
 from .readiness import HealthSnapshot
 from .recovery import Recovery, RecoveryStore, resume_setup, update_handle
 
@@ -309,6 +310,7 @@ async def voice_session(
     """
     stopped = False
     tasks: dict[str, asyncio.Task] = {}
+    approvals = ApprovalGate()
     send_lock = asyncio.Lock()
     current: dict = {"upstream": None}
     loop = asyncio.get_running_loop()
@@ -362,9 +364,20 @@ async def voice_session(
                         data = json.loads(item.data)
                     except json.JSONDecodeError:
                         break
-                    if isinstance(data, dict) and data.get("type") == "stop":
+                    if not isinstance(data, dict):
+                        continue
+                    if data.get("type") == "stop":
                         stopped = True
                         break
+                    if data.get("type") == "approval":
+                        # Only the current validated owner socket can confirm.
+                        token, allow = data.get("id"), data.get("allow")
+                        if isinstance(token, str) and isinstance(allow, bool):
+                            approvals.resolve(token, allow)
+                    elif data.get("type") == "ping":
+                        marker = data.get("id")
+                        if isinstance(marker, int) and 0 <= marker <= 2147483647:
+                            await ws.send_json({"type": "pong", "id": marker})
                 else:
                     break
 
@@ -374,10 +387,22 @@ async def voice_session(
             args = call.get("args") or {}
             if name == "ask_hermes" and isinstance(args, dict):
                 question = str(args.get("request", "")).strip()
-                result = (
-                    await run_hermes(session, config, question, recovery.hermes_session)
-                    if question else "Empty Hermes request."
-                )
+                if not question:
+                    result = "Empty Hermes request."
+                else:
+                    try:
+                        approval_id, future = approvals.new(question)
+                        await ws.send_json({
+                            "type": "approval_request", "id": approval_id,
+                            "request": question[:2000], "expires_seconds": 45,
+                        })
+                        allowed = await approvals.wait(approval_id, future)
+                    except RuntimeError:
+                        allowed = False
+                    result = (
+                        await run_hermes(session, config, question, recovery.hermes_session)
+                        if allowed else "Hermes tool request denied or timed out. No action executed."
+                    )
             else:
                 result = "Unknown tool."
             await send_upstream({
@@ -499,6 +524,7 @@ async def voice_session(
                         "message": "ครบ 15 นาทีแล้ว กรุณาเริ่มสนทนาใหม่",
                     })
             finally:
+                approvals.reject_all()
                 for task in transports + list(tasks.values()):
                     task.cancel()
                 await asyncio.gather(*transports, *tasks.values(), return_exceptions=True)
