@@ -1,3 +1,4 @@
+# ruff: noqa: I001  # Sorted stdlib imports; formatter/isort blank-line disagreement.
 """Optional Redis-backed leader lease and alert transition deduplication.
 
 A single monitor needs no Redis. With multiple replicas, one leader probes,
