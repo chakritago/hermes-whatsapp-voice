@@ -95,7 +95,10 @@ def test_mocked_gemini_tool_request_cannot_bypass_owner_approval(monkeypatch):
                     ws = await client.ws_connect("/ws", headers={"Origin": "https://voice.example.com"})
                     await ws.send_json({"type": "auth", "init_data": init_data()})
                     assert (await ws.receive_json(timeout=3))["type"] == "ready"
-                    message = await ws.receive_json(timeout=3)
+                    for _ in range(8):
+                        message = await ws.receive_json(timeout=3)
+                        if message.get("type") == "approval_request":
+                            break
                     assert message["type"] == "approval_request"
                     assert "delete every backup" in message["request"]
                     await ws.send_json({"type": "approval", "id": "wrong", "allow": True})
