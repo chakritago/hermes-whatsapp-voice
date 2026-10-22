@@ -116,6 +116,7 @@ function Restore-Backup {
     }
     $startup = switch ($old.StartMode) {
         'Auto' { 'Automatic' }
+        'Automatic' { 'Automatic' }
         'Manual' { 'Manual' }
         'Disabled' { 'Disabled' }
         default { throw "Unrecognized prior StartMode" }
