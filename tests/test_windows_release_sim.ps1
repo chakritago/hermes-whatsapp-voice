@@ -27,7 +27,7 @@ function Invoke-RestMethod { param($Uri,$TimeoutSec,$Method) return @{
     ok=$true;ready=$true
 } }
 function Start-Sleep { param($Seconds) }
-function Stop-Service { param($Name,$Force,$ErrorAction) $global:fakeServiceStatus='Stopped' }
+function Stop-Service { param($Name,[switch]$Force,$ErrorAction) $global:fakeServiceStatus='Stopped' }
 function Start-Service { param($Name,$ErrorAction) $global:fakeServiceStatus='Running' }
 function Restart-Service { param($Name,$ErrorAction) $global:fakeRestarts++;$global:fakeServiceStatus='Running' }
 function Set-Service { param($Name,$StartupType,$ErrorAction) $global:fakeStartMode=$StartupType }
