@@ -279,3 +279,28 @@ User-initiated End clears ticket. On page close the microphone is stopped and th
 Physical Windows reboot without login; actual service account setup; physical backup/rollback and service restart;
 two real monitor hosts plus shared Redis; Telegram mobile WebView approval and accessibility;
 live Gemini audio and device hot swap. PR must remain Draft and must not be merged before these gates pass.
+
+
+## R6: Security, durable alerts and release fault-injection (Draft)
+
+### Release Gate Failure Injection
+Windows GitHub Actions now runs simulated service restart, automatic-start transition, corruption of a SHA-256-verified backup file, restoration after a failed service restart, and double-failure handling when rollback itself fails. A double failure raises a CRITICAL error with the snapshot location instead of claiming success. All service calls in this test are mocked and use an isolated temporary directory. **This does not reboot the OS or test a real Windows service/account.** Backups store source and non-secret metadata; they cannot restore dependencies, credentials or machine state.
+
+### Distributed Redis alert queue
+When HERMES_MONITOR_REDIS_URL is configured, external monitor replicas store down/recovered transitions and their FIFO event entries in a **single Redis Lua operation**. A leader lease fences stale monitors. Delivery acknowledgement removes an event only after Telegram Bot API reports success; HTTP 429 and unsuccessful deliveries retain the event with retry schedule. Old leader tokens cannot dequeue after failover. Redis unavailability fails closed. A crash after Telegram acknowledges a message but before Redis acknowledgement can result in a duplicate message; **exactly-once delivery is not supported**. Configure persistent Redis AOF/RDB, backups, authentication, TLS and restricted network access for production. With one monitor and no Redis, the old disk queue continues working.
+
+### Tool approval security, audit integrity
+Every Hermes ask_hermes request still requires an explicit owner tap. HERMES_APPROVAL_MAX_RISK can be review, medium, or high (default high); higher-risk requests are blocked **on the server before any tool dispatch**, regardless of UI action. Labels are heuristic and advisory; default-on approval remains required for all levels. No voice instruction auto-approves. Audit JSONL now includes an HMAC chain: record editing or reordering is detectable on subsequent loads/appends. Existing unsigned history remains readable; new signed entries anchor that earlier history. Logs do not store the actual request, audio or tokens. **A complete log truncation or deletion is not detectable without an external trusted checkpoint**; NTFS ACLs, immutable remote log replication and backup retention are needed for stronger assurance. Failures writing/verifying audit block tool execution.
+
+### Health analytics & Approval Center
+The owner-authenticated WebSocket returns sample-based readiness aggregates by UTC hour/day, separated into Gateway API, Hermes capabilities and Telegram. Gemini is represented as a separate *connection event* when a real voice connection occurs, not falsely counted as always-online. The UI can switch chart granularity and component, and filter/search audit history by risk, decision and keyed request tag. The chart is sampled and stored only in memory; it resets when the backend restarts and is not a contractual uptime SLA.
+
+### Accessibility, audio and session privacy
+Added larger touch targets, keyboard focus ring, Escape-to-deny, focus on the default Deny button, reduced-motion CSS and compact mobile layout. Tests inspect the page contract in Node, not real Telegram WebView. To finish Release Gate, manually check Android TalkBack and iOS VoiceOver reading order, high contrast, 200% text scale and one-handed controls in actual Telegram.
+
+Mic handoff connects a newly acquired device before disconnecting the old source to reduce cut-outs. Speaker switching attenuates then restores playback gain. The dashboard estimates mic RMS and clipped samples, with network-aware buffer indicators. Browser permission and selected device support vary; physical audio hot-swap is still unverified.
+
+**Session Continuity is now opt-in by default.** The explicit privacy checkbox allows a short-lived owner-bound recovery ticket only in sessionStorage, and the Clear button removes it and the stored consent preference. On reopening, a user must click Restore and grant mic permission again. Browser storage may be cleared by Telegram. The Clear button does not erase separately stored server audit records. API keys, Gemini resumption handles and Telegram initData are never stored in sessionStorage.
+
+### Physical Release Gate still outstanding
+Windows installation/real reboot without login and rollback; two live external hosts/Redis with a simulated outage; Telegram WebView/TalkBack/VoiceOver; Gemini Live real key/latency; and mic/speaker unplug tests. No Merge until these pass.

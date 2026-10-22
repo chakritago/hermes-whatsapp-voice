@@ -23,7 +23,7 @@ from aiohttp import ClientError, ClientSession, ClientTimeout, WSMsgType, web
 
 from .alerts import gateway_watch
 from .approval import ApprovalGate
-from .approval_policy import classify_request
+from .approval_policy import classify_request, policy_allows
 from .audit import ApprovalAudit, audit_path
 from .health_history import HealthHistory
 from .readiness import HealthSnapshot
@@ -338,9 +338,11 @@ async def voice_session(
                 if ready.type != WSMsgType.TEXT or "setupComplete" not in json.loads(ready.data):
                     raise RuntimeError("Gemini Live did not confirm session setup")
             except BaseException:
+                health_history.record_gemini(False)
                 await upstream.close()
                 raise
             current["upstream"] = upstream
+            health_history.record_gemini(True)
 
         async def send_upstream(message: dict) -> None:
             async with send_lock:
@@ -405,18 +407,25 @@ async def voice_session(
                     record_ok = True
                     try:
                         audit.append("requested", risk.level, question)
-                        approval_id, future = approvals.new(question)
-                        await ws.send_json({
-                            "type": "approval_request", "id": approval_id,
-                            "request": question,
-                            "risk": risk.level,
-                            "reason": risk.reason,
-                            "expires_seconds": 45,
-                        })
-                        allowed = await approvals.wait(approval_id, future)
-                        audit.append("approved" if allowed else "denied", risk.level, question)
+                        if not policy_allows(risk.level):
+                            audit.append("blocked", risk.level, question)
+                            await ws.send_json({
+                                "type": "approval_blocked", "risk": risk.level,
+                                "reason": "คำสั่งนี้ถูกปิดโดยนโยบายสิทธิ์บนเซิร์ฟเวอร์",
+                            })
+                        else:
+                            approval_id, future = approvals.new(question)
+                            await ws.send_json({
+                                "type": "approval_request", "id": approval_id,
+                                "request": question,
+                                "risk": risk.level,
+                                "reason": risk.reason,
+                                "expires_seconds": 45,
+                            })
+                            allowed = await approvals.wait(approval_id, future)
+                            audit.append("approved" if allowed else "denied", risk.level, question)
                     except (RuntimeError, OSError, ValueError):
-                        LOG.warning("Approval audit/unavailable: Hermes tool not executed")
+                        LOG.warning("Approval audit unavailable: no Hermes tool dispatched")
                         record_ok = False
                         allowed = False
                     # A failed audit MUST block the action, even if the owner clicked approve.
@@ -499,6 +508,7 @@ async def voice_session(
                     LOG.warning("Gemini connection interrupted: %s", type(exc).__name__)
                     failures += 1
                 finally:
+                    health_history.record_gemini(False)
                     old = current["upstream"]
                     current["upstream"] = None
                     if old is not None:

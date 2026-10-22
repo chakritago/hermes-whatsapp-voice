@@ -54,6 +54,7 @@ function Save-Backup {
         # Service executable paths can include arguments; do not store credentials.
         SourceRoot = $root
         CodeFiles = @()
+        FileHashes = @{}
     }
     $source = Join-Path $root 'telegram_miniapp'
     $dest = Join-Path $folder 'telegram_miniapp'
@@ -65,6 +66,7 @@ function Save-Backup {
         [void](New-Item -ItemType Directory -Path (Split-Path $target -Parent) -Force)
         Copy-Item -LiteralPath $file.FullName -Destination $target -Force
         $metadata.CodeFiles += $relative
+        $metadata.FileHashes[$relative] = (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash
     }
     $metadata | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $folder 'release.json') -Encoding UTF8
     # A service password, user env vars and API tokens are never in these backups.
@@ -82,6 +84,19 @@ function Restore-Backup {
     $svc = Get-Svc
     if ($svc.StartName -ne $old.StartAccount) {
         throw 'Service logon account changed. Reconcile account manually; password was not backed up.'
+    }
+    # Validate every snapshot before mutating a live service or source file.
+    foreach ($relative in @($old.CodeFiles)) {
+        if ($relative -notmatch '^telegram_miniapp[\\/]' -or $relative -match '\.\.') {
+            throw 'Unsafe relative path in release backup'
+        }
+        $source = Join-Path $Folder $relative
+        if (-not (Test-Path -LiteralPath $source)) { throw "Missing backup file: $relative" }
+        if (-not $old.FileHashes -or -not $old.FileHashes.$relative) {
+            throw "Missing SHA256 manifest for backup: $relative"
+        }
+        $actual = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash
+        if ($actual -ne $old.FileHashes.$relative) { throw "Corrupted backup file: $relative" }
     }
     Write-Host "Rollback candidate: $Folder"
     Write-Host ('Files: ' + @($old.CodeFiles).Count + ', original mode: ' + $old.StartMode)
@@ -139,8 +154,14 @@ if ($Mode -eq 'Preflight') {
         if (-not (Test-Ready)) { throw 'Service failed readiness after restart' }
         Write-Host ('Release gate passed. Snapshot: ' + $folder)
     } catch {
-        Write-Warning ('Release gate failed. Rolling back snapshot: ' + $_.Exception.Message)
-        Restore-Backup -Folder $folder
-        throw 'Release was rolled back after failed verification.'
+        $failure = $_.Exception.Message
+        Write-Warning ("Release gate failed: " + $failure)
+        try {
+            Restore-Backup -Folder $folder
+        } catch {
+            throw ("CRITICAL: release failed AND automatic rollback failed: " + $_.Exception.Message +
+                ". Snapshot: " + $folder + ". Inspect service and restore manually. Original error: " + $failure)
+        }
+        throw ("Release failed and snapshot restored. Original error: " + $failure)
     }
 }

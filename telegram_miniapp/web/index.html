@@ -169,6 +169,26 @@ main{gap:18px;padding-top:24px}
 .risk-badge[data-risk="medium"]{color:#e7ce84}
 @media(max-width:420px){.access-bar button{min-width:0;font-size:12px}.controls label{min-width:100%}
   .shell{padding:14px 11px 20px}.dual-waves{grid-template-columns:1fr 1fr}}
+
+.privacy{width:100%;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px;color:var(--text)}
+.privacy h3{font-size:16px;margin:0 0 8px}
+.privacy-option{display:flex;gap:10px;align-items:center;line-height:1.6;font-size:14px}
+.privacy-option input{width:20px;height:20px;flex:none}
+.privacy p{font-size:12px;color:var(--muted)}
+#privacyClear{background:var(--card-alt);border:1px solid var(--line);color:var(--text);font-size:13px;padding:10px}
+.approval-filters,.health-controls{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0}
+.approval-filters label,.health-controls label{flex:1 1 130px;font-size:12px;color:var(--muted)}
+.approval-filters input,.approval-filters select,.health-controls select{
+ width:100%;background:var(--card-alt);color:var(--text);border:1px solid var(--line);padding:9px;border-radius:10px;
+ min-height:44px;font:inherit
+}
+button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid #ffd56b;outline-offset:3px}
+#approvalPanel button{min-height:48px}
+@media(max-width:390px){.approval-filters label{min-width:100%}
+ #approvalPanel{padding:12px}.approval-buttons button{padding:12px 6px;font-size:14px}
+ .diagnostics{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;animation-duration:.01ms!important;
+ transition-duration:.01ms!important}}
 </style>
 </head>
 <body>
@@ -215,14 +235,23 @@ main{gap:18px;padding-top:24px}
   <label id="outputRow" hidden>ลำโพง <select id="outputSelect" aria-label="เลือกอุปกรณ์เสียง"><option value="default">ลำโพงเริ่มต้น</option></select></label>
 </div>
 <p id="reconnectInfo" role="status" aria-live="polite"></p>
+<section class="privacy" aria-label="ความเป็นส่วนตัวและการกู้คืน">
+  <h3>การเก็บข้อมูลการกู้คืน</h3>
+  <label class="privacy-option"><input type="checkbox" id="privacyResume">
+    อนุญาตให้เก็บตั๋วกู้คืนชั่วคราวบนเครื่องนี้
+  </label>
+  <p id="privacySummary" role="status">ค่าเริ่มต้น: ไม่เก็บตั๋วกู้คืน</p>
+  <button type="button" id="privacyClear">ล้างข้อมูลกู้คืนในเบราว์เซอร์</button>
+</section>
 <section class="diagnostics" aria-label="ข้อมูลการส่งเสียงและเครือข่าย">
   <div><span>Latency (RTT)</span><strong id="diagRtt">— ms</strong></div>
   <div><span>Audio Buffer</span><strong id="diagBuffer">0 ms</strong></div>
   <div><span>Mic Level</span><strong id="diagMic">0%</strong></div>
   <div><span>Network</span><strong id="diagQuality">รอเชื่อมต่อ</strong></div>
   <div><span>Underrun / Drop</span><strong id="diagDrop">0</strong></div>
+  <div><span>Audio Quality</span><strong id="audioHealth">ยังไม่เปิดไมค์</strong></div>
 </section>
-<section id="approvalPanel" class="approval" role="alertdialog" aria-labelledby="approvalHeading" aria-describedby="approvalText" hidden>
+<section id="approvalPanel" class="approval" role="alertdialog" aria-modal="true" aria-labelledby="approvalHeading" aria-describedby="approvalText" hidden>
   <h3 id="approvalHeading">ยืนยันคำสั่ง Hermes</h3>
   <p>ตรวจสอบคำสั่งก่อนอนุญาต AI ใช้เครื่องมือ คำสั่งจะไม่ทำงานหากไม่กดอนุมัติภายใน 45 วินาที</p>
   <p id="approvalRisk" class="risk-badge" role="status">โปรดตรวจคำสั่ง</p>
@@ -234,12 +263,34 @@ main{gap:18px;padding-top:24px}
 </section>
 <section class="health" aria-label="Gateway Uptime and Readiness" id="healthDashboard">
  <h3>Gateway Uptime & Health</h3>
+ <div class="health-controls">
+  <label>ช่วงเวลา <select id="healthPeriod" aria-label="ช่วงเวลาของกราฟ">
+    <option value="hour">รายชั่วโมง</option><option value="day">รายวัน</option>
+  </select></label>
+  <label>บริการ <select id="healthComponent" aria-label="บริการที่แสดงในกราฟ">
+    <option value="ready">รวม</option><option value="api">Gateway</option>
+    <option value="capabilities">Hermes Tools</option><option value="telegram">Telegram</option>
+  </select></label>
+ </div>
  <p id="healthInfo" role="status">รอข้อมูลจาก Gateway</p>
  <canvas id="healthChart" width="480" height="105" role="img" aria-label="กราฟสถานะ Gateway ย้อนหลัง สีเขียวพร้อมใช้งาน สีส้มไม่พร้อม"></canvas>
  <h4>เหตุการณ์ล่าสุด</h4><ol id="healthTimeline"></ol>
 </section>
 <section class="audit-center" aria-label="ประวัติอนุมัติคำสั่ง">
- <h3>Approval Center</h3><p>เก็บเฉพาะผลการตัดสินใจ ระดับความเสี่ยง และรหัสอ้างอิง ไม่เก็บข้อความคำสั่งใน Audit</p>
+ <h3>Approval Center</h3>
+ <div class="approval-filters" role="group" aria-label="ค้นหาและกรองประวัติอนุมัติ">
+  <label>ค้นหารหัส <input id="auditSearch" type="search" aria-label="ค้นหารหัสอ้างอิงหรือผลอนุมัติ"></label>
+  <label>ความเสี่ยง <select id="auditRiskFilter" aria-label="กรองระดับความเสี่ยง">
+    <option value="">ทั้งหมด</option><option value="high">สูง</option>
+    <option value="medium">ปานกลาง</option><option value="review">ตรวจสอบ</option>
+  </select></label>
+  <label>ผล <select id="auditDecisionFilter" aria-label="กรองผลอนุมัติ">
+    <option value="">ทั้งหมด</option><option value="approved">อนุมัติ</option>
+    <option value="denied">ปฏิเสธ</option><option value="blocked">บล็อก</option>
+    <option value="requested">ร้องขอ</option>
+  </select></label>
+ </div>
+ <p>เก็บเฉพาะผลการตัดสินใจ ระดับความเสี่ยง และรหัสอ้างอิง ไม่เก็บข้อความคำสั่งใน Audit</p>
  <ol id="approvalHistory"></ol>
 </section>
 <audio id="speakerAudio" autoplay playsinline hidden></audio>

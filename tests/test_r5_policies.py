@@ -35,7 +35,7 @@ def test_safe_audit_no_plaintext_and_persistence(tmp_path):
     assert "only-this-test-key" not in raw
     assert len(ApprovalAudit(path, "only-this-test-key").history()) == 2
     first = json.loads(raw.splitlines()[0])
-    assert set(first) == {"at", "decision", "risk", "request_tag"}
+    assert {"at", "decision", "risk", "request_tag", "previous", "seal"} == set(first)
 
 
 def test_audit_corruption_fails_closed(tmp_path):

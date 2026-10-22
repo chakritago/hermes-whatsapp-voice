@@ -20,6 +20,11 @@ const healthChart = byId("healthChart"), healthInfo = byId("healthInfo"), health
 const micSelect = byId("micSelect"), micRow = byId("micRow"), resumeButton = byId("resumeSession");
 const contrastToggle = byId("contrastToggle"), compactToggle = byId("compactToggle"), fontToggle = byId("fontToggle");
 const denyButton = byId("denyAction"), moodText = byId("moodText");
+const auditSearch = byId("auditSearch"), auditRiskFilter = byId("auditRiskFilter");
+const auditDecisionFilter = byId("auditDecisionFilter"), healthPeriod = byId("healthPeriod");
+const healthComponent = byId("healthComponent"), privacyToggle = byId("privacyResume");
+const privacyClear = byId("privacyClear"), privacySummary = byId("privacySummary");
+const audioHealth = byId("audioHealth");
 const reconnectInfo = byId("reconnectInfo");
 const speakerAudio = byId("speakerAudio");
 const ctx2d = canvas.getContext("2d");
@@ -51,6 +56,7 @@ let readyAt = 0, diagnosticsTimer = null, nextPing = 0, currentApproval = null;
 let approvalTimer = null;
 const SESSION_KEY = "hermes.voice.recovery.v3";
 function savedRecovery() {
+  if (!privacyToggle.checked) return null;
   try {
     const item = JSON.parse(sessionStorage.getItem(SESSION_KEY) || "null");
     if (item && typeof item.ticket === "string" && item.expires > Date.now() && item.ticket.length <= 128) return item.ticket;
@@ -58,13 +64,30 @@ function savedRecovery() {
   return null;
 }
 function preserveRecovery() {
-  if (!resumeTicket) return;
+  if (!privacyToggle.checked || !resumeTicket) return;
   try { sessionStorage.setItem(SESSION_KEY, JSON.stringify({ticket:resumeTicket, expires:Date.now()+110000})); }
   catch { /* WebView storage unavailable */ }
 }
 function discardRecovery() {
   try { sessionStorage.removeItem(SESSION_KEY); } catch { /* unavailable */ }
 }
+try { privacyToggle.checked = localStorage.getItem("hermes.voice.privacyOptIn") === "yes"; }
+catch { privacyToggle.checked = false; }
+privacyToggle.addEventListener("change", () => {
+  try { localStorage.setItem("hermes.voice.privacyOptIn", privacyToggle.checked ? "yes" : "no"); }
+  catch { /* disabled storage */ }
+  if (!privacyToggle.checked) { discardRecovery(); resumeButton.hidden = true; }
+  else preserveRecovery();
+  privacySummary.textContent = privacyToggle.checked ?
+    "จัดเก็บตั๋วกู้คืนชั่วคราวไม่เกิน 110 วินาทีใน Session Storage" :
+    "ไม่จัดเก็บตั๋วกู้คืนหลังปิด Mini App";
+});
+privacyClear.addEventListener("click", () => {
+  discardRecovery(); privacyToggle.checked = false;
+  try { localStorage.removeItem("hermes.voice.privacyOptIn"); } catch { /* unavailable */ }
+  resumeButton.hidden = true;
+  privacySummary.textContent = "ล้างตั๋วกู้คืนในเบราว์เซอร์แล้ว (ไม่ลบ Audit บนเซิร์ฟเวอร์)";
+});
 function setViewOption(name, value) {
   document.documentElement.dataset[name] = value;
   try { localStorage.setItem("hermes.voice."+name, value); } catch { /* unavailable */ }
@@ -85,47 +108,74 @@ for (const [name, button, values] of [
     button.setAttribute("aria-pressed", selected === values[0] ? "false" : "true");
   });
 }
+let storedAudit = [], storedHealth = null;
 function displayAudit(rows) {
+  if (Array.isArray(rows)) storedAudit = rows;
+  const keyword = auditSearch.value.trim().toLowerCase();
+  const risk = auditRiskFilter.value, decision = auditDecisionFilter.value;
   approvalHistory.replaceChildren();
-  for (const item of (Array.isArray(rows) ? rows.slice(-14).reverse() : [])) {
+  for (const item of storedAudit.slice().reverse().filter(item =>
+    (!risk || item.risk === risk) && (!decision || item.decision === decision) &&
+    (!keyword || (item.request_tag || "").toLowerCase().includes(keyword) ||
+     item.decision.toLowerCase().includes(keyword) || item.risk.includes(keyword))
+  ).slice(0,30)) {
     const line = document.createElement("li");
-    const when = new Date(item.at * 1000).toLocaleString("th-TH");
-    line.textContent = when + " · " + item.risk + " · " + item.decision + " · #" + item.request_tag?.slice(0,8);
+    line.textContent = new Date(item.at * 1000).toLocaleString("th-TH") +
+      " · " + item.risk + " · " + item.decision + " · #" + item.request_tag?.slice(0,10);
     approvalHistory.appendChild(line);
   }
 }
+for (const control of [auditSearch, auditRiskFilter, auditDecisionFilter]) {
+  control.addEventListener("input", () => displayAudit(null));
+  control.addEventListener("change", () => displayAudit(null));
+}
 function displayHealth(packet) {
-  const samples = Array.isArray(packet.samples) ? packet.samples.slice(-144) : [];
-  const pct = packet.ready_percent;
-  healthInfo.textContent = pct == null ? "ยังไม่มีข้อมูล" :
-    "พร้อมทำงาน " + pct + "% จาก " + packet.total_samples + " ตัวอย่าง · เปลี่ยนสถานะ " + packet.transitions + " ครั้ง";
+  if (packet) storedHealth = packet;
+  const data = storedHealth;
+  if (!data) return;
+  healthInfo.textContent = data.ready_percent == null ? "ยังไม่มีข้อมูล" :
+    "พร้อมทำงาน " + data.ready_percent + "% จาก " + data.total_samples +
+    " ตัวอย่าง · เปลี่ยนสถานะ " + data.transitions + " ครั้ง";
+  const period = healthPeriod.value === "day" ? "daily" : "hourly";
+  const component = healthComponent.value || "ready";
+  const list = Array.isArray(data[period]) ? data[period].slice(-48) : [];
   const ctx = healthChart.getContext("2d"), w = healthChart.width, h = healthChart.height;
   ctx.clearRect(0,0,w,h);
-  ctx.fillStyle = "#40536e";ctx.fillRect(0,h-1,w,1);
-  if (!samples.length) return;
-  const width = w / samples.length;
-  samples.forEach((item,i) => {
-    ctx.fillStyle = item.ready ? "#40cba3" : "#f09b80";
-    ctx.fillRect(i*width, item.ready ? h*.15 : h*.6, Math.max(1,width-.5),item.ready ? h*.85 : h*.4);
+  ctx.fillStyle = "#40536e"; ctx.fillRect(0,h-1,w,1);
+  list.forEach((bucket,i) => {
+    const value = Number(bucket[component+"_percent"]) || 0;
+    const width = w / Math.max(1,list.length);
+    ctx.fillStyle = value > 90 ? "#40cba3" : value > 50 ? "#e8b46a" : "#f09b80";
+    ctx.fillRect(i*width, h*(100-value)/100, Math.max(1,width-2),h*value/100);
   });
   healthTimeline.replaceChildren();
-  for (let i=samples.length-1;i>=0 && healthTimeline.children.length<8;i--) {
-    if (i>0 && samples[i].ready === samples[i-1].ready) continue;
+  const events = Array.isArray(data.timeline) ? data.timeline.slice(-16).reverse() : [];
+  for (const entry of events) {
     const line = document.createElement("li");
-    line.textContent = new Date(samples[i].at*1000).toLocaleString("th-TH")+" · "+
-      (samples[i].ready ? "พร้อมใช้งาน" : "ขัดข้อง/ไม่พร้อม");
+    line.textContent = new Date(entry.at*1000).toLocaleString("th-TH") +
+      " · " + entry.component.toUpperCase() + " · " +
+      (entry.up ? "เชื่อมต่อ/พร้อมใช้งาน" : "ขาดการเชื่อมต่อ/ไม่พร้อม");
     healthTimeline.appendChild(line);
   }
 }
+for (const control of [healthPeriod,healthComponent]) control.addEventListener("change", () => displayHealth(null));
 if (savedRecovery()) resumeButton.hidden = false;
 let recoveringMic = false, lastMicLevel = 0;
 const bufferController = new window.HermesAdaptiveBuffer();
 function clearApproval() {
+  const wasOpen = !approvalPanel.hidden;
   clearTimeout(approvalTimer); approvalTimer = null;
   currentApproval = null;
   approvalPanel.hidden = true;
   approveButton.disabled = denyButton.disabled = false;
+  if (wasOpen && desired) mute.focus?.();
 }
+approvalPanel.addEventListener("keydown", event => {
+  if (event.key === "Escape" && currentApproval) {
+    event.preventDefault();
+    respondApproval(false);
+  }
+});
 function respondApproval(allow) {
   if (!currentApproval) return;
   if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({
@@ -151,6 +201,20 @@ function startDiagnostics() {
     diagQuality.textContent = bufferController.rtt < 200 ? "ดี" :
       bufferController.rtt < 600 ? "ปานกลาง" : "เครือข่ายช้า";
     diagDrop.textContent = String(bufferController.underruns + bufferController.drops);
+    if (analyser && !muted) {
+      const values = new Float32Array(analyser.fftSize);
+      analyser.getFloatTimeDomainData(values);
+      let energy = 0, clipped = 0;
+      for (const sample of values) {
+        energy += sample * sample;
+        if (Math.abs(sample) >= 0.98) clipped++;
+      }
+      const rms = Math.sqrt(energy / Math.max(1, values.length));
+      audioHealth.textContent = recoveringMic ? "กำลังกู้คืนไมค์" :
+        clipped > values.length * 0.02 ? "เสียงดัง/อาจแตก" :
+        rms < 0.004 ? "เสียงเบาหรือเงียบ" :
+        rms > 0.3 ? "เสียงดัง" : "คุณภาพเสียงปกติ";
+    } else audioHealth.textContent = muted ? "ปิดไมค์" : "กำลังเชื่อมต่อไมค์";
     if (bufferController.rtt > 700 || socket.bufferedAmount > 140000) {
       diagQuality.textContent = "ความหน่วงสูง · กำลังลด Buffer";
     }
@@ -168,13 +232,14 @@ async function recoverAudioDevice() {
      !devices.some(d => d.kind === "audioinput" && d.deviceId === current.getSettings().deviceId));
   if (missing) {
     recoveringMic = true;
+    audioHealth.textContent = "กำลังสลับไมค์...";
     try {
       const next = await navigator.mediaDevices.getUserMedia({audio:{
         echoCancellation:true, noiseSuppression:true, autoGainControl:true
       }, video:false});
       const newSource = audio.createMediaStreamSource(next);
-      source?.disconnect();
       newSource.connect(analyser);
+      source?.disconnect();
       stream?.getTracks().forEach(t => t.stop());
       stream = next; source = newSource;
       stream.getAudioTracks().forEach(track => { track.onended = recoverAudioDevice; });
@@ -329,12 +394,17 @@ micSelect.addEventListener("change", async () => {
   }
 });
 outputSelect.addEventListener("change", async () => {
+  const volume = outputGain?.gain;
+  const startTime = audio?.currentTime || 0;
   try {
+    volume?.setTargetAtTime?.(0.12, startTime, 0.025);
     await speakerAudio.setSinkId(outputSelect.value);
     await speakerAudio.play();
-    description.textContent = "เปลี่ยนอุปกรณ์เสียงแล้ว";
+    description.textContent = "สลับลำโพงแล้ว — เสียงกลับสู่ระดับเดิม";
   } catch {
-    description.textContent = "Telegram บนอุปกรณ์นี้ยังไม่อนุญาตให้เลือกลำโพง";
+    description.textContent = "สลับลำโพงไม่ได้ โปรดตรวจสิทธิ์ใน Telegram";
+  } finally {
+    volume?.setTargetAtTime?.(1, audio?.currentTime || startTime, 0.04);
   }
 });
 async function initializeAudio() {
@@ -553,6 +623,8 @@ function connectSocket() {
         pendingPings.delete(msg.id);
         bufferController.observeRtt(performance.now() - started);
       }
+    } else if (msg.type === "approval_blocked") {
+      description.textContent = "นโยบายเซิร์ฟเวอร์บล็อกคำสั่งระดับ " + (msg.risk || "ไม่ทราบ");
     } else if (msg.type === "approval_history") {
       displayAudit(msg.rows);
     } else if (msg.type === "health_history") {
@@ -565,6 +637,7 @@ function connectSocket() {
         riskText.textContent = "ระดับความเสี่ยง: " + (msg.risk || "review") + " · " + (msg.reason || "ตรวจคำสั่งก่อนดำเนินการ");
         riskText.dataset.risk = msg.risk || "review";
         approvalPanel.hidden = false;
+        denyButton.focus?.(); // TalkBack/keyboard opens on the fail-closed choice.
         const requestId = currentApproval;
         approvalTimer = setTimeout(() => {
           if (currentApproval === requestId) {

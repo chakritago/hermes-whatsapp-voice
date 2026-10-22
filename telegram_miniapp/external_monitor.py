@@ -17,6 +17,7 @@ from urllib.parse import urlsplit
 from aiohttp import ClientError, ClientSession, ClientTimeout
 
 from .alerts import AlertQueue, AlertState, drain_queue
+from .distributed_alerts import DistributedAlerts
 from .monitor_cluster import MonitorLease, replicas_configured
 
 LOG = logging.getLogger("hermes.external_monitor")
@@ -100,10 +101,15 @@ async def monitor_once(session: ClientSession, config: MonitorConfig, state: Ale
     statuses = await asyncio.gather(*(public_probe(session, u) for u in config.endpoints))
     healthy = any(statuses)
     event = state.observe(healthy, now=asyncio.get_running_loop().time())
-    if event and (cluster is None or await cluster.accept_event(event)):
-        queue.enqueue(event)
-    # Ordered retry queue: never claims Telegram message delivered before Bot API ack.
-    await drain_queue(queue, session, config)
+    if cluster is not None:
+        durable = DistributedAlerts(cluster)
+        if event:
+            await durable.enqueue(event)
+        await durable.drain(session, config)
+    else:
+        if event:
+            queue.enqueue(event)
+        await drain_queue(queue, session, config)
     return healthy
 
 

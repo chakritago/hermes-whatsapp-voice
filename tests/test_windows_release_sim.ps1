@@ -27,9 +27,15 @@ function Invoke-RestMethod { param($Uri,$TimeoutSec,$Method) return @{
     ok=$true;ready=$true
 } }
 function Start-Sleep { param($Seconds) }
-function Stop-Service { param($Name,[switch]$Force,$ErrorAction) $global:fakeServiceStatus='Stopped' }
+function Stop-Service { param($Name,[switch]$Force,$ErrorAction)
+    if ($global:failStop) { throw 'Injected Stop-Service failure' }
+    $global:fakeServiceStatus='Stopped'
+}
 function Start-Service { param($Name,$ErrorAction) $global:fakeServiceStatus='Running' }
-function Restart-Service { param($Name,$ErrorAction) $global:fakeRestarts++;$global:fakeServiceStatus='Running' }
+function Restart-Service { param($Name,$ErrorAction)
+    if ($global:failRestart) { throw 'Injected Restart-Service failure' }
+    $global:fakeRestarts++;$global:fakeServiceStatus='Running'
+}
 function Set-Service { param($Name,$StartupType,$ErrorAction) $global:fakeStartMode=$StartupType }
 $scriptPath = Join-Path $scriptDirectory 'release_gate_windows.ps1'
 & $scriptPath -Mode Preflight
@@ -58,6 +64,38 @@ if ($global:fakeStartMode -notin @('Auto','Automatic')) { throw 'Expected Automa
 Start-Service -Name 'HermesTelegramVoice'
 & $scriptPath -Mode Verify
 if ($global:fakeServiceStatus -ne 'Running') { throw 'Automatic service startup simulation failed' }
+# Fault injection: corrupt backup must never be copied to a running installation.
+$liveFile = Join-Path $scriptDirectory 'server.py'
+$liveBefore = Get-Content -LiteralPath $liveFile -Raw
+[IO.File]::WriteAllText((Join-Path $backupDir.FullName 'telegram_miniapp\server.py'), 'tampered')
+$rejected = $false
+try { & $scriptPath -Mode Rollback -BackupPath $backupDir.FullName -Apply }
+catch { $rejected = ($_.Exception.Message -match 'Corrupted backup') }
+if (-not $rejected) { throw 'Corrupted backup was accepted' }
+if ((Get-Content -LiteralPath $liveFile -Raw) -ne $liveBefore) { throw 'Corrupted backup mutated live code' }
+Write-Host 'PASS: invalid backup hash rejected without modifying live code'
+
+# Fault injection: Service fails to restart, the automatic restore must recover.
+$global:failRestart = $true
+$rollbackDetected = $false
+try { & $scriptPath -Mode Release -Apply }
+catch { $rollbackDetected = ($_.Exception.Message -match 'snapshot restored') }
+$global:failRestart = $false
+if (-not $rollbackDetected) { throw 'Failed Service restart was not rolled back' }
+if ($global:fakeServiceStatus -ne 'Running') { throw 'Service not restored after injected restart failure' }
+Write-Host 'PASS: injected Service restart failure triggers automatic rollback'
+
+# Fault injection: rollback itself fails, must surface a CRITICAL error and snapshot.
+$global:failRestart = $true
+$global:failStop = $true
+$criticalDetected = $false
+try { & $scriptPath -Mode Release -Apply }
+catch { $criticalDetected = ($_.Exception.Message -match 'CRITICAL: release failed AND automatic rollback failed') }
+$global:failRestart = $false
+$global:failStop = $false
+if (-not $criticalDetected) { throw 'Double failure did not report CRITICAL recovery steps' }
+Write-Host 'PASS: injected rollback failure reports CRITICAL and snapshot location'
+
 Write-Host 'PASS: simulated auto-start after boot transition (no OS reboot)'
 Write-Host 'PASS: simulated Windows preflight/backup/dry-run/restart/rollback/verification'
 Write-Host 'NO physical Windows Service install or reboot was performed.'

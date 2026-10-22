@@ -241,3 +241,7 @@ This optional Telegram integration now includes an independent external HTTPS up
 ### R5 (Draft)
 
 Added Windows Service Release simulation in CI, Hermes risk approval and privacy-preserving audit, Redis-based external monitor coordination, owner-only health dashboards, accessibility controls, advanced audio input selection, network-aware buffering and opt-in short-lived session recovery. See [R5 setup and release limitations](docs/telegram-miniapp.md). Physical tests pending.
+
+### R6: Failure injection, distributed Redis queue, secure approvals and adaptive Mini App
+
+Adds fault-injection for Windows release rollback, SHA-256 validated backups, Redis leader-fenced alert queue, server-side tool permission ceiling and HMAC chained audit, hourly/daily readiness analytics, filterable Approval Center, WebView accessibility checks, smoother device switch and opt-in session retention. The original WhatsApp implementation is unchanged. See [deployment and remaining release blockers](docs/telegram-miniapp.md).
