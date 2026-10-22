@@ -5,12 +5,12 @@ import asyncio
 import json
 from types import SimpleNamespace
 
+from telegram_miniapp.alerts import AlertQueue, AlertState
 from telegram_miniapp.approval_policy import classify_request
 from telegram_miniapp.audit import ApprovalAudit
+from telegram_miniapp.external_monitor import MonitorConfig, monitor_once
 from telegram_miniapp.health_history import HealthHistory
 from telegram_miniapp.monitor_cluster import MonitorLease
-from telegram_miniapp.external_monitor import MonitorConfig, monitor_once
-from telegram_miniapp.alerts import AlertQueue, AlertState
 
 
 def test_approval_policy_never_removes_human_approval():

@@ -16,8 +16,8 @@ from pathlib import Path
 
 from aiohttp import ClientError, ClientSession, ClientTimeout
 
-from .readiness import HealthSnapshot, check_readiness
 from .health_history import HealthHistory
+from .readiness import HealthSnapshot, check_readiness
 
 LOG = logging.getLogger("hermes.telegram_alerts")
 MAX_QUEUED = 50

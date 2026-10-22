@@ -14,13 +14,22 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from .monitor_cluster import MonitorLease, replicas_configured
-
 from aiohttp import ClientError, ClientSession, ClientTimeout
 
 from .alerts import AlertQueue, AlertState, drain_queue
+from .monitor_cluster import MonitorLease, replicas_configured
 
 LOG = logging.getLogger("hermes.external_monitor")
+
+
+def valid_public_origin(value: str) -> bool:
+    parsed = urlsplit(value)
+    return (
+        parsed.scheme == "https" and bool(parsed.hostname)
+        and parsed.hostname not in {"localhost", "127.0.0.1", "::1"}
+        and not parsed.username and not parsed.password
+        and not parsed.query and not parsed.fragment and parsed.path in {"", "/"}
+    )
 
 
 @dataclass(frozen=True)
@@ -47,13 +56,7 @@ class MonitorConfig:
         owner = os.getenv("TELEGRAM_OWNER_ID", "")
         if (
             not url
-            or not all(
-                (lambda p: p.scheme == "https" and bool(p.hostname) and
-                 not p.username and not p.password and not p.query and not p.fragment)(
-                    urlsplit(target)
-                )
-                for target in (urls or (url,))
-            )
+            or not all(valid_public_origin(target) for target in (urls or (url,)))
             or not bot
             or not owner.isdecimal()
             or int(owner) <= 0

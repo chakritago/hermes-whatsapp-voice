@@ -7,8 +7,12 @@ As with any external message API, exactly-once delivery cannot be guaranteed.
 """
 from __future__ import annotations
 
+import logging
 import os
 import secrets
+
+
+LOG = logging.getLogger("hermes.monitor_cluster")
 
 
 class MonitorLease:
@@ -35,14 +39,16 @@ class MonitorLease:
             self.owned = bool(await self.redis.set(self.key, self.token, ex=self.ttl, nx=True))
             self.just_claimed = self.owned
             return self.owned
-        except Exception:  # RedisError subclasses vary across redis-py versions.
+        except Exception as exc:  # noqa: BLE001 - optional RedisError type
+            LOG.warning("Redis lease unavailable: %s", type(exc).__name__)
             self.owned = False
             return False
 
     async def current_down(self) -> bool:
         try:
             return await self.redis.get(self.state_key) == b"down"
-        except Exception:
+        except Exception as exc:  # noqa: BLE001 - optional RedisError type
+            LOG.warning("Redis state unavailable: %s", type(exc).__name__)
             # Ignore unavailable history; event dedup still fails closed below.
             return False
 
@@ -56,7 +62,8 @@ class MonitorLease:
                 'redis.call("SET", KEYS[2], ARGV[2]); return 1',
                 2, self.key, self.state_key, self.token, event,
             ))
-        except Exception:
+        except Exception as exc:  # noqa: BLE001 - optional RedisError type
+            LOG.warning("Redis transition failed: %s", type(exc).__name__)
             return False
 
     async def release(self) -> None:
@@ -66,8 +73,8 @@ class MonitorLease:
                 'return redis.call("DEL", KEYS[1]) else return 0 end',
                 1, self.key, self.token,
             )
-        except Exception:
-            pass
+        except Exception as exc:  # noqa: BLE001 - optional RedisError type
+            LOG.warning("Redis release failed: %s", type(exc).__name__)
         self.owned = False
 
 
