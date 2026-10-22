@@ -180,20 +180,20 @@ your Telegram bot, HTTPS proxy, Hermes API and Gemini key, then launch from Tele
 
 **External Uptime Monitor:** install the Python monitor on a *different* continuously
 running computer/VPS, not the Windows PC being watched. Install
-\`pip install -r telegram_miniapp/requirements.txt\`, configure the monitor host's
-\`HERMES_MONITOR_URL\` as your publicly reachable HTTPS origin,
-\`TELEGRAM_BOT_TOKEN\` and \`TELEGRAM_OWNER_ID\` locally, then run
-\`python -m telegram_miniapp.external_monitor\` under a persistent service
-manager such as systemd. Optional \`HERMES_MONITOR_INTERVAL\` (default 60 seconds)
-and \`EXTERNAL_MONITOR_QUEUE_FILE\` (path writable by monitor service).
-The monitor reads **only** public \`/healthz\` and \`/readyz\`, refuses
+`pip install -r telegram_miniapp/requirements.txt`, configure the monitor host's
+`HERMES_MONITOR_URL` as your publicly reachable HTTPS origin,
+`TELEGRAM_BOT_TOKEN` and `TELEGRAM_OWNER_ID` locally, then run
+`python -m telegram_miniapp.external_monitor` under a persistent service
+manager such as systemd. Optional `HERMES_MONITOR_INTERVAL` (default 60 seconds)
+and `EXTERNAL_MONITOR_QUEUE_FILE` (path writable by monitor service).
+The monitor reads **only** public `/healthz` and `/readyz`, refuses
 non-HTTPS destinations and HTTP redirects, and sends a Telegram message after
 three failures (and another when healthy). It cannot distinguish power loss from
 an ISP outage, tunnel failure or other endpoint disruption. Both the monitor
 and Telegram Bot API need network availability; alert retries are persisted.
 Do not store bot credentials in source control.
 
-**Hermes Tool Approval:** every Gemini \`ask_hermes\` tool call, including reads,
+**Hermes Tool Approval:** every Gemini `ask_hermes` tool call, including reads,
 is blocked until the same **owner-authenticated Telegram Mini App WebSocket**
 receives a specific **Approve this time** click. The exact requested text is
 displayed in the Mini App; automatic denial occurs after 45 seconds, on
@@ -205,18 +205,18 @@ risk classifier might misclassify a dangerous operation. Do not confuse
 Gemini reading a spoken "yes" with explicit button approval.
 
 **Windows Service Release Gate:** run from elevated PowerShell in repo root:
-- \`.\telegram_miniapp\release_gate_windows.ps1 -Mode Preflight\`: checks
+- `.\telegram_miniapp\release_gate_windows.ps1 -Mode Preflight`: checks
   service identity, local venv and endpoint liveness/readiness; doesn't mutate.
-- \`.\telegram_miniapp\release_gate_windows.ps1 -Mode Backup\`: saves
+- `.\telegram_miniapp\release_gate_windows.ps1 -Mode Backup`: saves
   non-secret service identity, start mode, running state plus a snapshot of
-  source files (\`.py\`, \`.js\`, \`.html\`, \`.ps1\`, \`.txt\`) under ProgramData.
+  source files (`.py`, `.js`, `.html`, `.ps1`, `.txt`) under ProgramData.
   Take the backup **before** replacing deployed code.
-- \`.\telegram_miniapp\release_gate_windows.ps1 -Mode Release\`: dry-run by default.
-  Add \`-Apply\` to back up current files, restart the service and verify
-  \`/healthz\` + \`/readyz\`, with automatic rollback on failure.
-- \`.\telegram_miniapp\release_gate_windows.ps1 -Mode Rollback\`: dry-run by default,
-  showing the latest snapshot; add \`-Apply\` to restore code and service
-  startup/running state. Use \`-BackupPath\` to choose an older snapshot.
+- `.\telegram_miniapp\release_gate_windows.ps1 -Mode Release`: dry-run by default.
+  Add `-Apply` to back up current files, restart the service and verify
+  `/healthz` + `/readyz`, with automatic rollback on failure.
+- `.\telegram_miniapp\release_gate_windows.ps1 -Mode Rollback`: dry-run by default,
+  showing the latest snapshot; add `-Apply` to restore code and service
+  startup/running state. Use `-BackupPath` to choose an older snapshot.
 
 **Rollback boundaries:** It cannot restore passwords, API keys, environment
 variables, Windows service logon passwords, operating-system changes or untracked
@@ -230,7 +230,7 @@ WebSocket ping/pong, adaptive queued audio buffer duration, microphone activity,
 network quality bucket, and counters for audio drops/underruns. The Gemini
 playback scheduling target adapts to observed RTT variability and caps excessive
 backlog. This is a best-effort jitter buffer, not a guaranteed latency SLA.
-Smart device recovery listens for \`devicechange\`/ended audio tracks and attempts
+Smart device recovery listens for `devicechange`/ended audio tracks and attempts
 a new mic capture (with browser permission) and default speaker fallback;
 Telegram WebViews may restrict device enumeration or automatic recovery.
 Avatar reflects idle/listening/speaking/approval/reconnecting states with
