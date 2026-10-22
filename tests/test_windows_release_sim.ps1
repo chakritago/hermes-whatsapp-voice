@@ -54,7 +54,7 @@ $global:fakeServiceStatus='Stopped'
 & $scriptPath -Mode Preflight
 # Simulate the service controller starting an Auto-mode service at boot.
 # This is a state-machine simulation only, not an operating-system reboot.
-if ($global:fakeStartMode -ne 'Auto') { throw 'Expected Automatic startup mode before simulated reboot' }
+if ($global:fakeStartMode -notin @('Auto','Automatic')) { throw 'Expected Automatic startup mode before simulated reboot' }
 Start-Service -Name 'HermesTelegramVoice'
 & $scriptPath -Mode Verify
 if ($global:fakeServiceStatus -ne 'Running') { throw 'Automatic service startup simulation failed' }
