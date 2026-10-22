@@ -10,7 +10,6 @@ from __future__ import annotations
 import logging
 import os
 import sys
-import time
 
 from .supervisor import GatewaySupervisor, worker_commands
 

@@ -1,7 +1,6 @@
 """Offline resilience and Windows supervisor tests, with no real network calls."""
 
 import asyncio
-import json
 from types import SimpleNamespace
 
 import pytest

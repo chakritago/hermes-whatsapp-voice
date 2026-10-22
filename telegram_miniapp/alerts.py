@@ -64,7 +64,7 @@ class AlertQueue:
         try:
             raw = json.loads(self.path.read_text(encoding="utf-8"))
             if not isinstance(raw, list):
-                raise ValueError("invalid alert queue")
+                raise TypeError("invalid alert queue")
             for item in raw[-MAX_QUEUED:]:
                 if item["event"] in {"down", "recovered"}:
                     self.items.append(PendingAlert(
