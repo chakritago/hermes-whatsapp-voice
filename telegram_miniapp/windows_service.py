@@ -18,8 +18,8 @@ if sys.platform == "win32":
     import servicemanager
     import win32api
     import win32con
-    import win32security
     import win32event
+    import win32security
     import win32service
     import win32serviceutil
 
