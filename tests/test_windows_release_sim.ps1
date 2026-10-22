@@ -52,6 +52,12 @@ if ((Get-Content (Join-Path $scriptDirectory 'server.py') -Raw).Trim() -ne 'v1')
 & $scriptPath -Mode Verify
 $global:fakeServiceStatus='Stopped'
 & $scriptPath -Mode Preflight
-$global:fakeServiceStatus='Running'
+# Simulate the service controller starting an Auto-mode service at boot.
+# This is a state-machine simulation only, not an operating-system reboot.
+if ($global:fakeStartMode -ne 'Auto') { throw 'Expected Automatic startup mode before simulated reboot' }
+Start-Service -Name 'HermesTelegramVoice'
+& $scriptPath -Mode Verify
+if ($global:fakeServiceStatus -ne 'Running') { throw 'Automatic service startup simulation failed' }
+Write-Host 'PASS: simulated auto-start after boot transition (no OS reboot)'
 Write-Host 'PASS: simulated Windows preflight/backup/dry-run/restart/rollback/verification'
 Write-Host 'NO physical Windows Service install or reboot was performed.'
