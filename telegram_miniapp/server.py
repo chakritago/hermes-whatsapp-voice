@@ -231,6 +231,13 @@ async def script(request: web.Request) -> web.FileResponse:
     )
 
 
+async def adaptive_buffer_script(request: web.Request) -> web.FileResponse:
+    return web.FileResponse(
+        Path(__file__).parent / "web" / "audio-buffer.js",
+        headers={"Cache-Control": "no-store", "Content-Type": "application/javascript; charset=utf-8"},
+    )
+
+
 async def health(request: web.Request) -> web.Response:
     return web.json_response({"ok": True, "service": "telegram-miniapp-voice"})
 
@@ -527,6 +534,7 @@ def create_app(config: Config) -> web.Application:
     app.router.add_get("/", index)
     app.router.add_get("/app.js", script)
     app.router.add_get("/audio-worklet.js", audio_worklet)
+    app.router.add_get("/audio-buffer.js", adaptive_buffer_script)
     app.router.add_get("/readyz", ready)
     app.router.add_get("/healthz", health)
     app.router.add_get("/ws", socket_handler)

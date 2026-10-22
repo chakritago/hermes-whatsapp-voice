@@ -118,6 +118,26 @@ main{gap:18px;padding-top:24px}
   header p{font-size:10px}
 }
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+.mood{font-size:13px;color:var(--muted);margin-top:-8px;letter-spacing:.5px;text-align:center}
+.orb-wrap[data-mood="approval"] .orb{background:linear-gradient(145deg,#f8c66a,#a5763e)}
+.orb-wrap[data-mood="reconnecting"] .orb{filter:grayscale(.65)}
+.orb-wrap[data-mood="listening"] .avatar-eye{height:18px}
+.diagnostics{width:100%;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px}
+.diagnostics div{min-width:0;padding:11px 7px;background:var(--card);border:1px solid var(--line);border-radius:12px;text-align:center}
+.diagnostics span{font-size:10px;display:block;color:var(--muted);line-height:1.4}
+.diagnostics strong{font-size:13px;display:block;color:var(--text);font-variant-numeric:tabular-nums;margin-top:4px;overflow-wrap:anywhere}
+.approval{width:100%;background:var(--card);border:2px solid #e2b76a;border-radius:20px;padding:18px;position:relative}
+.approval[hidden]{display:none}
+.approval h3{font-size:17px;margin:0 0 6px;color:var(--text)}
+.approval p{font-size:13px;line-height:1.6;color:var(--muted)}
+.approval blockquote{max-height:170px;overflow:auto;overflow-wrap:anywhere;white-space:pre-wrap;
+  color:var(--text);border-left:3px solid #dfaf63;background:var(--card-alt);padding:12px;margin:12px 0}
+.approval-buttons{display:flex;gap:10px}
+.approval-buttons button{font-size:14px;padding:12px;color:var(--text);background:var(--card-alt);border:1px solid var(--line)}
+#approveAction{background:#216f56;color:white}
+@media(max-width:500px){.diagnostics{grid-template-columns:repeat(3,minmax(0,1fr))}.diagnostics div{padding:8px 5px}}
+@media(prefers-reduced-motion:reduce){.orb-wrap[data-mood] .orb{transition:none}}
 </style>
 </head>
 <body>
@@ -132,6 +152,7 @@ main{gap:18px;padding-top:24px}
 <div id="orb" class="orb-wrap">
   <div class="orb" aria-label="Hermes Avatar"><div class="avatar-face" aria-hidden="true"><span class="avatar-eye"></span><span class="avatar-eye"></span></div></div>
 </div>
+<div id="moodText" class="mood" aria-live="off">พร้อมสนทนา</div>
 <section class="dual-waves" aria-label="สถานะเสียงของคุณและ Hermes">
   <button type="button" id="visualizer" aria-label="คลื่นเสียงของคุณ กดเพื่อสลับรูปแบบ">
     <div class="wave-head"><strong>🎙 YOU</strong><span id="userStatus" aria-live="off">ไมค์พร้อมใช้งาน</span></div>
@@ -153,10 +174,27 @@ main{gap:18px;padding-top:24px}
   <label id="outputRow" hidden>ลำโพง <select id="outputSelect" aria-label="เลือกอุปกรณ์เสียง"><option value="default">ลำโพงเริ่มต้น</option></select></label>
 </div>
 <p id="reconnectInfo" role="status" aria-live="polite"></p>
+<section class="diagnostics" aria-label="ข้อมูลการส่งเสียงและเครือข่าย">
+  <div><span>Latency (RTT)</span><strong id="diagRtt">— ms</strong></div>
+  <div><span>Audio Buffer</span><strong id="diagBuffer">0 ms</strong></div>
+  <div><span>Mic Level</span><strong id="diagMic">0%</strong></div>
+  <div><span>Network</span><strong id="diagQuality">รอเชื่อมต่อ</strong></div>
+  <div><span>Underrun / Drop</span><strong id="diagDrop">0</strong></div>
+</section>
+<section id="approvalPanel" class="approval" role="alertdialog" aria-labelledby="approvalHeading" aria-describedby="approvalText" hidden>
+  <h3 id="approvalHeading">ยืนยันคำสั่ง Hermes</h3>
+  <p>ตรวจสอบคำสั่งก่อนอนุญาต AI ใช้เครื่องมือ คำสั่งจะไม่ทำงานหากไม่กดอนุมัติภายใน 45 วินาที</p>
+  <blockquote id="approvalText"></blockquote>
+  <div class="approval-buttons">
+    <button type="button" id="denyAction">ปฏิเสธ</button>
+    <button type="button" id="approveAction">อนุมัติครั้งนี้</button>
+  </div>
+</section>
 <audio id="speakerAudio" autoplay playsinline hidden></audio>
 <section class="conversation" aria-label="บทสนทนา"><h3>บทสนทนา</h3><div id="transcript" aria-live="polite"><p class="empty">ข้อความจากบทสนทนาจะปรากฏที่นี่</p></div></section>
 </main><footer>เข้ารหัสด้วย HTTPS/WSS · ไมโครโฟนใช้งานเฉพาะระหว่างสนทนา</footer>
 </div>
+<script src="/audio-buffer.js" defer></script>
 <script src="/app.js" defer></script>
 </body>
 </html>

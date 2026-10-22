@@ -174,3 +174,73 @@ simple Mini App liveness check.
 
 GitHub Actions runs offline checks on Windows and Linux. For end-to-end testing, configure
 your Telegram bot, HTTPS proxy, Hermes API and Gemini key, then launch from Telegram.
+
+
+## Release R4 — Independent monitoring, approvals, diagnostics
+
+**External Uptime Monitor:** install the Python monitor on a *different* continuously
+running computer/VPS, not the Windows PC being watched. Install
+\`pip install -r telegram_miniapp/requirements.txt\`, configure the monitor host's
+\`HERMES_MONITOR_URL\` as your publicly reachable HTTPS origin,
+\`TELEGRAM_BOT_TOKEN\` and \`TELEGRAM_OWNER_ID\` locally, then run
+\`python -m telegram_miniapp.external_monitor\` under a persistent service
+manager such as systemd. Optional \`HERMES_MONITOR_INTERVAL\` (default 60 seconds)
+and \`EXTERNAL_MONITOR_QUEUE_FILE\` (path writable by monitor service).
+The monitor reads **only** public \`/healthz\` and \`/readyz\`, refuses
+non-HTTPS destinations and HTTP redirects, and sends a Telegram message after
+three failures (and another when healthy). It cannot distinguish power loss from
+an ISP outage, tunnel failure or other endpoint disruption. Both the monitor
+and Telegram Bot API need network availability; alert retries are persisted.
+Do not store bot credentials in source control.
+
+**Hermes Tool Approval:** every Gemini \`ask_hermes\` tool call, including reads,
+is blocked until the same **owner-authenticated Telegram Mini App WebSocket**
+receives a specific **Approve this time** click. The exact requested text is
+displayed in the Mini App; automatic denial occurs after 45 seconds, on
+disconnect, on cancellation, on explicit Deny or if the app closes. Approval
+tokens are single-use and expire; voice/LLM statements cannot grant permission.
+No Telegram webhook or callback-query handler is taken over. This first
+release is intentionally fail-closed for *all* Hermes calls, as a heuristic
+risk classifier might misclassify a dangerous operation. Do not confuse
+Gemini reading a spoken "yes" with explicit button approval.
+
+**Windows Service Release Gate:** run from elevated PowerShell in repo root:
+- \`.\telegram_miniapp\release_gate_windows.ps1 -Mode Preflight\`: checks
+  service identity, local venv and endpoint liveness/readiness; doesn't mutate.
+- \`.\telegram_miniapp\release_gate_windows.ps1 -Mode Backup\`: saves
+  non-secret service identity, start mode, running state plus a snapshot of
+  source files (\`.py\`, \`.js\`, \`.html\`, \`.ps1\`, \`.txt\`) under ProgramData.
+  Take the backup **before** replacing deployed code.
+- \`.\telegram_miniapp\release_gate_windows.ps1 -Mode Release\`: dry-run by default.
+  Add \`-Apply\` to back up current files, restart the service and verify
+  \`/healthz\` + \`/readyz\`, with automatic rollback on failure.
+- \`.\telegram_miniapp\release_gate_windows.ps1 -Mode Rollback\`: dry-run by default,
+  showing the latest snapshot; add \`-Apply\` to restore code and service
+  startup/running state. Use \`-BackupPath\` to choose an older snapshot.
+
+**Rollback boundaries:** It cannot restore passwords, API keys, environment
+variables, Windows service logon passwords, operating-system changes or untracked
+user data. It restores only the explicitly listed source files, not Python
+dependency versions or files newly introduced after the backup. Run it as
+Administrator after protecting the ProgramData backup directory with appropriate
+NTFS ACLs. Never rely on this as the only system backup.
+
+**Voice Diagnostics and Recovery:** the dashboard shows RTT from authenticated
+WebSocket ping/pong, adaptive queued audio buffer duration, microphone activity,
+network quality bucket, and counters for audio drops/underruns. The Gemini
+playback scheduling target adapts to observed RTT variability and caps excessive
+backlog. This is a best-effort jitter buffer, not a guaranteed latency SLA.
+Smart device recovery listens for \`devicechange\`/ended audio tracks and attempts
+a new mic capture (with browser permission) and default speaker fallback;
+Telegram WebViews may restrict device enumeration or automatic recovery.
+Avatar reflects idle/listening/speaking/approval/reconnecting states with
+reduced-motion support.
+
+### R4 verification / live blockers
+
+Offline CI covers Windows and Linux Python security/monitor tests, mocked Gemini
+WebSocket tool execution with owner approval, HTTP read-only monitor, AudioWorklet
+PCM, adaptive buffer, and dashboard boot/DOM sanity. **Still required before
+production:** physical Windows service install/reboot and credential access under
+restricted account; actual second-machine outage simulation; live Telegram
+Mini App approval on mobile/desktop; real Gemini audio latency and device hot-swap.
