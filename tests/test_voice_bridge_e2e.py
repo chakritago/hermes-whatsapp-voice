@@ -27,7 +27,8 @@ def init_data() -> str:
     return urlencode(fields)
 
 
-def test_end_to_end_owner_audio_and_transcript(monkeypatch):
+def test_end_to_end_owner_audio_and_transcript(monkeypatch, tmp_path):
+    monkeypatch.setenv("HERMES_APPROVAL_AUDIT_FILE", str(tmp_path / "audit.jsonl"))
     observed = []
 
     async def fake_gemini(request):
@@ -81,7 +82,8 @@ def test_end_to_end_owner_audio_and_transcript(monkeypatch):
     assert base64.b64decode(observed[1]["realtimeInput"]["audio"]["data"]) == b"\x00\x00" * 160
 
 
-def test_end_to_end_socket_reconnect_reuses_ticket(monkeypatch):
+def test_end_to_end_socket_reconnect_reuses_ticket(monkeypatch, tmp_path):
+    monkeypatch.setenv("HERMES_APPROVAL_AUDIT_FILE", str(tmp_path / "audit.jsonl"))
     async def fake_gemini(request):
         ws = web.WebSocketResponse()
         await ws.prepare(request)

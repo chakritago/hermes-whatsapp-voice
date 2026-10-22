@@ -49,7 +49,8 @@ def test_approval_one_shot_and_timeout(monkeypatch):
     asyncio.run(scenario())
 
 
-def test_mocked_gemini_tool_request_cannot_bypass_owner_approval(monkeypatch):
+def test_mocked_gemini_tool_request_cannot_bypass_owner_approval(monkeypatch, tmp_path):
+    monkeypatch.setenv("HERMES_APPROVAL_AUDIT_FILE", str(tmp_path / "audit.jsonl"))
     submitted: list[dict] = []
     responses: list[dict] = []
 
@@ -119,7 +120,8 @@ def test_mocked_gemini_tool_request_cannot_bypass_owner_approval(monkeypatch):
     asyncio.run(scenario())
 
 
-def test_approval_no_unauthorized_telegram_id(monkeypatch):
+def test_approval_no_unauthorized_telegram_id(monkeypatch, tmp_path):
+    monkeypatch.setenv("HERMES_APPROVAL_AUDIT_FILE", str(tmp_path / "audit.jsonl"))
     async def fake_gemini(request):
         pytest.fail("unauthorized user must not reach Gemini")
     async def scenario():
