@@ -1,4 +1,5 @@
 """R6 security, HMAC integrity, Redis failover and time-bucket regression tests."""
+
 from __future__ import annotations
 
 import asyncio
@@ -125,6 +126,7 @@ def test_redis_durable_retry_and_failover(monkeypatch):
         second.owned = True
         redis.values[second.key] = second.token
         q2 = DistributedAlerts(second)
+
         async def delivered(*_args):
             return True, 0
 
