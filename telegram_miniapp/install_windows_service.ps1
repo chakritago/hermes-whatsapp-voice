@@ -24,6 +24,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Unable to locate venv site-packages' }
 # API keys are available to THAT account before starting.
 & $py -m telegram_miniapp.windows_service install --startup auto
 if ($LASTEXITCODE -ne 0) { throw 'Windows service registration failed' }
+& sc.exe failure HermesTelegramVoice reset= 86400 actions= restart/5000/restart/30000/restart/60000
+if ($LASTEXITCODE -ne 0) { throw 'Unable to configure Windows Service crash recovery' }
 Write-Host 'Service installed but NOT started. In services.msc set Hermes Telegram Voice Log On to a dedicated service account.'
 Write-Host 'Configure HERMES_MINIAPP_PYTHON and credentials under that account; then start the service.'
 Write-Host 'After configuration: Start-Service HermesTelegramVoice'

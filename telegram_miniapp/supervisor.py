@@ -21,6 +21,8 @@ from urllib.parse import urlparse
 def gateway_command(raw: str | None) -> list[str]:
     if not raw:
         return []
+    if "\n" in raw or "\r" in raw:
+        raise ValueError("Gateway commands may not contain control characters")
     if raw.lstrip().startswith("["):
         args = json.loads(raw)
         if not isinstance(args, list) or not all(isinstance(a, str) for a in args):
