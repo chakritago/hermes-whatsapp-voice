@@ -65,12 +65,11 @@ Run via your existing service manager; protect secrets as environment variables.
 
 ## Implementation / limits
 
-- Browser capture: microphone -> Web Audio ScriptProcessor -> mono signed PCM16 16 kHz.
+- Browser capture: microphone -> AudioWorklet -> mono signed PCM16 16 kHz in 40ms frames; ScriptProcessor is a fallback.
 - Browser playback: signed PCM16 mono 24 kHz -> Web Audio AudioBuffer.
 - WSS backend: aiohttp, Telegram HMAC validation, Gemini Live WebSocket, ask_hermes via Hermes API.
 - Supports interruptions and live transcriptions; API secrets never appear in browser code.
-- ScriptProcessor is a compatibility first release. AudioWorklet is recommended for
-  lower-jitter production audio on supported Telegram WebViews.
+- AudioWorklet runs audio conversion off the UI thread. Older Telegram WebViews fall back to ScriptProcessor.
 - Telegram bot cannot initiate a native Telegram call. Existing WhatsApp calling
   remains available separately.
 - Gemini Live automatically reconnects (up to four attempts, exponential backoff).
@@ -89,26 +88,88 @@ Run via your existing service manager; protect secrets as environment variables.
   device-default speaker remains the fallback.
 - Hardware microphone and actual Gemini connections require manual end-to-end testing.
 
+## Windows auto-start service and owned gateway supervision
+
+The optional **real Windows Service** uses pywin32 and runs after reboot **without user login**.
+It supervises the Mini App child and optionally an **owned** Hermes gateway child. It never
+terminates or steals an already-running external Hermes instance.
+
+1. Install Python 3.11+ in a machine-accessible folder and run the normal
+   `telegram_miniapp/start_windows.ps1` once to create the venv; then stop it.
+2. From an **elevated** PowerShell, run
+   `./telegram_miniapp/install_windows_service.ps1`. This registers the service
+   with startup set to **Automatic** but deliberately **does not start it yet**.
+3. Create/select a **dedicated low-privilege account** with `Log on as a service`
+   rights. In `services.msc` open **Hermes Telegram Voice → Properties → Log On**
+   and set this account. Never run Hermes's arbitrary tools as LocalSystem.
+4. Configure `TELEGRAM_BOT_TOKEN`, `TELEGRAM_OWNER_ID`, `API_SERVER_KEY`,
+   `GOOGLE_API_KEY` / `GEMINI_API_KEY`, and `MINIAPP_PUBLIC_URL` so they are
+   available to that service account at boot. **Do not put tokens in Git, command
+   lines, service display names or world-readable files.** The service identity
+   must have read permissions for the repo, Python and venv; its writable
+   profile must support the alert queue. Verify secrets are readable under
+   that identity before enabling the service.
+5. Set `HERMES_MINIAPP_PYTHON` to the absolute
+   `<repo>\\.venv-telegram\\Scripts\\python.exe` path (under the service
+   account), then run `Start-Service HermesTelegramVoice`. To inspect:
+   `Get-Service HermesTelegramVoice`, `http://127.0.0.1:8788/healthz`
+   and `http://127.0.0.1:8788/readyz`.
+6. Optionally set `HERMES_GATEWAY_COMMAND` to an executable plus argv, preferably
+   a JSON string array (e.g. `["hermes","gateway"]`) to supervise a **new gateway
+   owned by this service**. Do not enable it if another Hermes gateway is managed
+   by its own service/scheduled task. Use one owner per process.
+7. Grant write permission on the profile-local alert queue and the
+   `HERMES_SERVICE_LOG_DIR` location if configured, and configure Windows
+   service failure actions if desired. Test a restart and full PC reboot.
+
+The supervisor checks local Mini App liveness and authenticated Hermes
+`/v1/capabilities` readiness. **Only its child processes** are restarted after
+three failed probes (after a startup grace period), with bounded backoff.
+The Windows service itself starts automatically after reboot; pywin32 may require
+machine-wide install/postinstall on some Python distributions. Installation
+must be validated on the target Windows host. This is *not* a guarantee of alert
+delivery while the entire machine is offline.
+
+## Dual Voice Waveforms, Preflight, and Themes
+
+- Separate waveform visualizations for the microphone and actual Gemini playback,
+  with textual `YOU` / `HERMES` speaking states and a pulsing Hermes avatar.
+- An **Audio Device Preflight** button requests microphone permission, checks
+  signal activity and plays a quiet 440Hz tone locally. No recording is uploaded.
+- Three theme states: Auto (OS preference), Dark, Light. Theme preference
+  is stored locally when Telegram WebView allows it.
+- Reduced-motion setting removes animation; device-selector still falls back
+  to system default if `setSinkId` is unsupported.
+
 ## Telegram Gateway Alerts
 
 Enabled by default (disable with `GATEWAY_ALERTS_ENABLED=false`). The monitor:
-- Probes Hermes **API server** `GET /health` every 60 seconds.
+- Probes Hermes `GET /health`, authenticated `GET /v1/capabilities` and Telegram `getMe` (read-only) every 60 seconds.
 - Sends a Telegram `sendMessage` alert to **TELEGRAM_OWNER_ID only** after three
-  consecutive failures, and **one** recovery notification after `{"status":"ok"}`.
+  consecutive readiness failures, and one recovery event.
+- Failed deliveries are kept in a bounded **disk-backed FIFO** and retried with
+  exponential backoff, including Telegram HTTP 429 `retry_after` hints.
+  Queue persistence contains only generic down/recovered events — no secrets.
+- Configure `GATEWAY_ALERT_QUEUE_FILE` for an explicit writable queue location
+  if the default service-user profile is unavailable.
 - Does **not** use `getUpdates`, `setWebhook`, or Telegram polling: existing bots unaffected.
 - `GATEWAY_ALERT_INTERVAL` may be configured between 15 and 3600 seconds.
 - Can detect API server failures **only while this Mini App backend is running**.
   If the entire Windows PC, local network or alert process fails, it cannot
   notify you. Use an independent uptime monitor for host-offline notifications.
 
-The health endpoint is a liveness probe, not a guarantee that the Telegram
-gateway channel or all Hermes tools are functioning. To monitor those, add
-an authenticated gateway readiness probe in a subsequent release.
+The read-only readiness probes establish that the API server supports run
+submission and Telegram bot credentials/network work. They do **not** confirm
+the separate Telegram long-polling process is connected or every Hermes tool
+works. `/readyz` on the Mini App returns **only** ready/degraded status, never
+keys, Telegram account identifiers or internal URLs. `/healthz` remains a
+simple Mini App liveness check.
 
 ## Validation
 
     python -m pip install -r telegram_miniapp/requirements.txt pytest ruff
-    python -m pytest tests/test_telegram_miniapp.py -q
+    python -m pytest tests/test_telegram_miniapp.py tests/test_gateway_operations.py tests/test_voice_bridge_e2e.py -q
+    node tests/test_audio_worklet.cjs
     ruff check telegram_miniapp tests/test_telegram_miniapp.py
 
 GitHub Actions runs offline checks on Windows and Linux. For end-to-end testing, configure

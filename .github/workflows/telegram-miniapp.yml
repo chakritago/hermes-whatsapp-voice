@@ -21,8 +21,11 @@ jobs:
         with:
           python-version: "3.13"
       - run: python -m pip install -r requirements-dev.txt
-      - run: ruff format telegram_miniapp tests/test_telegram_miniapp.py
-      - run: ruff check telegram_miniapp tests/test_telegram_miniapp.py
-      - run: ruff format --check telegram_miniapp tests/test_telegram_miniapp.py
-      - run: python -m pytest tests/test_telegram_miniapp.py -q
+      - run: ruff format telegram_miniapp tests/test_telegram_miniapp.py tests/test_gateway_operations.py tests/test_voice_bridge_e2e.py
+      - run: ruff check telegram_miniapp tests/test_telegram_miniapp.py tests/test_gateway_operations.py tests/test_voice_bridge_e2e.py
+      - run: ruff format --check telegram_miniapp tests/test_telegram_miniapp.py tests/test_gateway_operations.py tests/test_voice_bridge_e2e.py
+      - run: python -m pytest tests/test_telegram_miniapp.py tests/test_gateway_operations.py tests/test_voice_bridge_e2e.py -q
       - run: node --check telegram_miniapp/web/app.js
+      - run: node --check telegram_miniapp/web/audio-worklet.js
+      - run: node tests/test_audio_worklet.cjs
+      - run: python -m compileall -q telegram_miniapp

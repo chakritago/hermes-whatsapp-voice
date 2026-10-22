@@ -233,3 +233,4 @@ modify the existing WhatsApp linked-device implementation.
 **Important:** Telegram Mini App voice chat is not a native Telegram phone call.
 The app requires a publicly reachable HTTPS URL and your own Telegram bot,
 Gemini key and enabled Hermes API server. The original WhatsApp calls remain available.
+\n### Windows gateway service, dashboard and audio QA\n\nThe optional Windows Service supervises the Mini App and only a gateway that it starts itself. Added readiness/Telegram alert retry with a disk-backed queue, Gemini reconnect preservation, separate microphone/Hermes waveforms, a dark/light voice dashboard, AudioWorklet 40ms PCM capture and a local microphone/speaker preflight. See [deployment and security guide](docs/telegram-miniapp.md) before installation. Hardware and live API E2E still require your own Windows/Telegram devices and secrets.\n

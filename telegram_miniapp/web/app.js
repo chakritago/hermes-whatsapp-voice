@@ -9,9 +9,30 @@ const status = byId("status"), statusText = byId("statusText");
 const description = byId("description"), transcript = byId("transcript");
 const orb = byId("orb"), outputSelect = byId("outputSelect"), outputRow = byId("outputRow");
 const visualizer = byId("visualizer"), canvas = byId("waveform");
+const hermesCanvas = byId("hermesWaveform"), hermesStatus = byId("hermesStatus");
+const userStatus = byId("userStatus"), preflightButton = byId("preflight");
+const preflightResult = byId("preflightResult"), themeButton = byId("themeToggle");
 const reconnectInfo = byId("reconnectInfo");
 const speakerAudio = byId("speakerAudio");
 const ctx2d = canvas.getContext("2d");
+const assistantCtx = hermesCanvas.getContext("2d");
+let playbackAnalyser = null, workletNode = null, preflighting = false;
+const themes = ["auto", "dark", "light"];
+let currentTheme = "auto";
+try { const stored = localStorage.getItem("hermes.voice.theme");
+  if (themes.includes(stored)) currentTheme = stored; } catch { /* private browser */ }
+function applyTheme() {
+  if (currentTheme === "auto") document.documentElement.removeAttribute("data-theme");
+  else document.documentElement.dataset.theme = currentTheme;
+  themeButton.textContent = currentTheme === "auto" ? "◐ อัตโนมัติ" : currentTheme === "dark" ? "☾ มืด" : "☀ สว่าง";
+  themeButton.setAttribute("aria-label", "ธีม: " + themeButton.textContent + " กดเพื่อสลับ");
+}
+themeButton.addEventListener("click", () => {
+  currentTheme = themes[(themes.indexOf(currentTheme) + 1) % themes.length];
+  try { localStorage.setItem("hermes.voice.theme", currentTheme); } catch { /* private browser */ }
+  applyTheme();
+});
+applyTheme();
 const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 let socket = null, stream = null, audio = null, processor = null, source = null;
 let analyser = null, silentGain = null, outputGain = null, outputStream = null;
@@ -41,6 +62,8 @@ function append(role, text) {
 function cancelPlayback() {
   for (const node of playing) { try { node.stop(); } catch { /* ended */ } }
   playing = []; playAt = 0;
+  hermesStatus.textContent = "Hermes พร้อมตอบ";
+  orb.dataset.speaking = "false";
 }
 function playback(bytes) {
   if (!audio || !active || !outputGain || bytes.byteLength % 2) return;
@@ -51,11 +74,20 @@ function playback(bytes) {
   const node = audio.createBufferSource();
   node.buffer = buffer;
   node.connect(outputGain);
+  hermesStatus.textContent = "Hermes กำลังพูด";
+  orb.dataset.speaking = "true";
+  node.onended = () => {
+    playing = playing.filter(x => x !== node);
+    if (!playing.length) {
+      hermesStatus.textContent = "Hermes พร้อมตอบ";
+      orb.dataset.speaking = "false";
+    }
+  };
   const when = Math.max(audio.currentTime + 0.025, playAt);
   node.start(when);
   playAt = when + buffer.duration;
   playing.push(node);
-  node.onended = () => { playing = playing.filter(x => x !== node); };
+
 }
 function toPcm16(samples, sampleRate) {
   const ratio = sampleRate / 16000;
@@ -115,28 +147,48 @@ async function initializeAudio() {
     analyser = audio.createAnalyser();
     analyser.fftSize = 256;
     source.connect(analyser);
-    processor = audio.createScriptProcessor(4096, 1, 1);
     silentGain = audio.createGain(); silentGain.gain.value = 0;
-    analyser.connect(processor);
-    processor.connect(silentGain);
+    // AudioWorklet capture uses 40ms PCM packets off the main thread.
+    if (audio.audioWorklet && typeof AudioWorkletNode !== "undefined") {
+      try {
+        await audio.audioWorklet.addModule("/audio-worklet.js");
+        workletNode = new AudioWorkletNode(audio, "hermes-mic", {numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1]});
+        workletNode.port.onmessage = event => {
+          if (!muted && active && desired && socket?.readyState === WebSocket.OPEN &&
+              socket.bufferedAmount < 262144 && event.data instanceof ArrayBuffer) {
+            socket.send(event.data);
+          }
+        };
+        analyser.connect(workletNode);
+        workletNode.connect(silentGain);
+      } catch { workletNode = null; }
+    }
+    if (!workletNode) {
+      processor = audio.createScriptProcessor(2048, 1, 1);
+      analyser.connect(processor);
+      processor.connect(silentGain);
+      processor.onaudioprocess = event => {
+        if (!muted && desired && active && socket?.readyState === WebSocket.OPEN &&
+            socket.bufferedAmount < 262144) {
+          socket.send(toPcm16(event.inputBuffer.getChannelData(0), audio.sampleRate));
+        }
+      };
+    }
     silentGain.connect(audio.destination);
     outputGain = audio.createGain();
+    playbackAnalyser = audio.createAnalyser();
+    playbackAnalyser.fftSize = 256;
+    outputGain.connect(playbackAnalyser);
     outputStream = audio.createMediaStreamDestination();
     // A media element supports setSinkId in eligible desktop browsers.
     if ("setSinkId" in speakerAudio) {
-      outputGain.connect(outputStream);
+      playbackAnalyser.connect(outputStream);
       speakerAudio.srcObject = outputStream.stream;
       try { await speakerAudio.play(); }
-      catch { outputGain.disconnect(); outputGain.connect(audio.destination); }
+      catch { playbackAnalyser.disconnect(); playbackAnalyser.connect(audio.destination); }
     } else {
-      outputGain.connect(audio.destination);
+      playbackAnalyser.connect(audio.destination);
     }
-    processor.onaudioprocess = event => {
-      if (!muted && desired && active && socket?.readyState === WebSocket.OPEN &&
-          socket.bufferedAmount < 262144) {
-        socket.send(toPcm16(event.inputBuffer.getChannelData(0), audio.sampleRate));
-      }
-    };
     stream.getAudioTracks().forEach(track => { track.enabled = false; });
     await refreshOutputs();
     drawWave();
@@ -147,8 +199,12 @@ function drawWave() {
   cancelAnimationFrame(waveFrame);
   const samples = new Uint8Array(analyser?.fftSize || 256);
   const bars = 42, w = canvas.width, h = canvas.height;
+  const assistantSamples = new Uint8Array(playbackAnalyser?.fftSize || 256);
   const frame = () => {
     ctx2d.clearRect(0, 0, w, h);
+    assistantCtx.clearRect(0, 0, hermesCanvas.width, hermesCanvas.height);
+    if (playbackAnalyser && active && playing.length) playbackAnalyser.getByteTimeDomainData(assistantSamples);
+    else assistantSamples.fill(128);
     if (analyser && active && !muted) analyser.getByteTimeDomainData(samples);
     else samples.fill(128);
     const gradient = ctx2d.createLinearGradient(0, 0, w, 0);
@@ -172,6 +228,21 @@ function drawWave() {
         ctx2d.fillRect(n * unit + 2, (h - height) / 2, Math.max(2, unit - 4), height);
       }
     }
+    // The assistant waveform follows actual playback RMS, not microphone input.
+    const width = hermesCanvas.width, height = hermesCanvas.height;
+    assistantCtx.strokeStyle = "#af91ff"; assistantCtx.fillStyle = "#af91ff";
+    const stride = width / bars;
+    for (let n = 0; n < bars; n++) {
+      const v = Math.abs((assistantSamples[Math.floor(n * assistantSamples.length / bars)] - 128) / 128);
+      const size = Math.max(5, v * (height - 10) * 1.6);
+      assistantCtx.fillRect(n * stride + 2, (height - size) / 2, Math.max(2, stride - 4), size);
+    }
+    if (analyser && active && !muted) {
+      const magnitude = samples.reduce((acc, sample) => acc + Math.abs(sample - 128), 0) / samples.length;
+      userStatus.textContent = magnitude > 2 ? "คุณกำลังพูด" : "กำลังฟังไมค์";
+    } else {
+      userStatus.textContent = muted ? "ไมค์ปิดอยู่" : "ไมค์พร้อมใช้งาน";
+    }
     if (desired && !prefersReducedMotion.matches) waveFrame = requestAnimationFrame(frame);
   };
   frame();
@@ -186,16 +257,19 @@ function syncMute() {
   mute.textContent = muted ? "🔇 เปิดไมค์" : "🎙 ปิดไมค์";
   mute.setAttribute("aria-pressed", String(muted));
   mute.classList.toggle("muted", muted);
+  workletNode?.port.postMessage({type: "enabled", value: desired && active && !muted});
+  if (muted) userStatus.textContent = "ไมค์ปิดอยู่";
 }
 mute.addEventListener("click", () => { muted = !muted; syncMute(); });
 async function disposeAudio() {
   cancelPlayback();
   cancelAnimationFrame(waveFrame); waveFrame = null;
   if (processor) { processor.onaudioprocess = null; processor.disconnect(); processor = null; }
-  for (const node of [source, analyser, silentGain, outputGain, outputStream]) {
+  if (workletNode) { workletNode.port.onmessage = null; workletNode.disconnect(); workletNode = null; }
+  for (const node of [source, analyser, silentGain, outputGain, playbackAnalyser, outputStream]) {
     try { node?.disconnect(); } catch { /* disconnected */ }
   }
-  source = analyser = silentGain = outputGain = outputStream = null;
+  source = analyser = silentGain = outputGain = playbackAnalyser = outputStream = null;
   if (stream) stream.getTracks().forEach(track => track.stop());
   stream = null;
   speakerAudio.pause(); speakerAudio.srcObject = null;
@@ -206,6 +280,7 @@ function scheduleReconnect() {
   if (readyAt && Date.now() - readyAt > 15000) reconnectCount = 0;
   readyAt = 0;
   active = false;
+  cancelPlayback();
   syncMute();
   if (!desired) return;
   if (reconnectCount >= MAX_BROWSER_RETRIES) {
@@ -251,6 +326,7 @@ function connectSocket() {
         stop();
       }
     } else if (msg.type === "status") {
+      if (msg.phase === "reconnecting") cancelPlayback();
       state(msg.message || "กำลังเชื่อมต่อ...", msg.phase === "restored", msg.phase);
     } else if (msg.type === "interrupted") {
       cancelPlayback();
@@ -273,6 +349,8 @@ function connectSocket() {
 }
 async function stop(explicit = true) {
   desired = false; active = false; ++connectionSequence;
+  userStatus.textContent = "ไมค์พร้อมใช้งาน";
+  hermesStatus.textContent = "Hermes พร้อมตอบ";
   clearTimeout(reconnectTimer); reconnectTimer = null;
   syncMute();
   const old = socket; socket = null;
@@ -285,6 +363,50 @@ async function stop(explicit = true) {
   state(explicit ? "สนทนาสิ้นสุด" : "หยุดการเชื่อมต่อ", false);
   if (explicit) description.textContent = "คุณสามารถเริ่มสนทนาใหม่ได้ทุกเมื่อ";
 }
+async function audioPreflight() {
+  if (preflighting || desired) return;
+  preflighting = true; preflightButton.disabled = true;
+  preflightResult.textContent = "กำลังตรวจสอบไมโครโฟน...";
+  let testingStream, context;
+  try {
+    if (!navigator.mediaDevices?.getUserMedia) throw new Error("unsupported");
+    testingStream = await navigator.mediaDevices.getUserMedia({audio:true, video:false});
+    context = new (window.AudioContext || window.webkitAudioContext)();
+    await context.resume();
+    const sourceNode = context.createMediaStreamSource(testingStream);
+    const detector = context.createAnalyser(); detector.fftSize = 256;
+    sourceNode.connect(detector);
+    const data = new Uint8Array(detector.fftSize);
+    let peak = 0;
+    for (let attempt = 0; attempt < 12; attempt++) {
+      await new Promise(resolve => setTimeout(resolve, 75));
+      detector.getByteTimeDomainData(data);
+      const amplitude = Math.max(...data.map(x => Math.abs(x - 128)));
+      peak = Math.max(peak, amplitude);
+    }
+    await refreshOutputs();
+    preflightResult.textContent = peak > 2 ?
+      "✓ ไมโครโฟนรับเสียงแล้ว · กำลังทดสอบลำโพง" :
+      "ไมโครโฟนเชื่อมต่อแล้ว แต่ยังตรวจไม่พบเสียงพูด · กำลังทดสอบลำโพง";
+    // Low-volume, short local beep; never sent to the server.
+    const oscillator = context.createOscillator(), gain = context.createGain();
+    oscillator.type = "sine"; oscillator.frequency.value = 440;
+    gain.gain.value = 0.015;
+    oscillator.connect(gain); gain.connect(context.destination);
+    oscillator.start(); oscillator.stop(context.currentTime + .18);
+    await new Promise(resolve => setTimeout(resolve, 230));
+    preflightResult.textContent = (peak > 2 ? "✓ ตรวจพบเสียงไมค์" : "⚠ ไม่พบเสียงไมค์") +
+      " · เล่นเสียงทดสอบแล้ว หากไม่ได้ยินให้ตรวจสอบระดับเสียง/ลำโพง";
+  } catch (error) {
+    preflightResult.textContent = "ไม่สามารถตรวจสอบเสียงได้: โปรดอนุญาตไมโครโฟนและตรวจสอบการตั้งค่าอุปกรณ์";
+  } finally {
+    testingStream?.getTracks().forEach(track => track.stop());
+    if (context) await context.close().catch(() => {});
+    preflightButton.disabled = false; preflighting = false;
+  }
+}
+preflightButton.addEventListener("click", audioPreflight);
+
 start.addEventListener("click", async () => {
   if (!tg?.initData || !window.isSecureContext || desired) return;
   desired = true; reconnectCount = 0; resumeTicket = null;

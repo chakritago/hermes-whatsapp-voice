@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="th">
+<html lang="th" data-theme="dark">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -61,21 +61,92 @@ footer{text-align:center;color:#8397af;font-size:12px;line-height:1.5;margin-top
 @keyframes blink{50%{opacity:.2}}
 @media(prefers-reduced-motion:reduce){.pill[data-phase="reconnecting"] .dot{animation:none}}
 @media(max-width:380px){.shell{padding:16px 12px 24px}main{gap:12px;padding:18px 0}.orb-wrap{width:144px;height:144px}}
+
+:root{
+  --page:#090e1a;--card:#141f31;--card-alt:#11263d;--line:#324660;
+  --text:#edf5ff;--muted:#adc0d7;--accent:#7bcfff;--button:#63c9ff;
+}
+:root[data-theme="light"]{
+  color-scheme:light;--page:#f1f6fc;--card:#fff;--card-alt:#e9f3ff;
+  --line:#b7c9db;--text:#162b46;--muted:#405873;--accent:#156ca9;--button:#187caf;
+}
+@media(prefers-color-scheme:light){
+  :root:not([data-theme]){color-scheme:light;--page:#f1f6fc;--card:#fff;
+    --card-alt:#e9f3ff;--line:#b7c9db;--text:#162b46;--muted:#405873;--accent:#156ca9;--button:#187caf}
+}
+:root{color:var(--text);background:var(--page);font-family:"Noto Sans Thai","Leelawadee UI","Segoe UI",Tahoma,sans-serif}
+body{color:var(--text);background:radial-gradient(circle at 50% -10%,var(--card-alt) 0%,var(--page) 60%)}
+.shell{max-width:680px}
+header{align-items:center}
+header .brand{flex:1;min-width:0}
+header p{font-weight:600;letter-spacing:1px;color:var(--muted)}
+#themeToggle{flex:0 0 auto;padding:9px 12px;border-radius:100px;font-size:13px;
+  background:var(--card);border:1px solid var(--line);color:var(--text)}
+main{gap:18px;padding-top:24px}
+.pill,.conversation{color:var(--text);background:var(--card);border-color:var(--line)}
+.pill{font-weight:600}
+.description,footer,#reconnectInfo{color:var(--muted)}
+.orb-wrap{width:162px;height:162px; background:radial-gradient(circle,var(--card-alt),transparent 75%)}
+.orb-wrap[data-speaking="true"] .orb{box-shadow:0 0 68px #8d70fba8;transform:scale(1.055)}
+.dual-waves{width:100%;display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.dual-waves button,.wave-card{display:block;flex:none;width:100%;padding:12px;min-height:112px;
+  border:1px solid var(--line);border-radius:18px;color:var(--text);background:var(--card);
+  cursor:pointer;text-align:left}
+.wave-card{cursor:default}
+.wave-head{display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:7px}
+.wave-head strong{font-size:12px;letter-spacing:.8px}
+.wave-head span{font-size:11px;color:var(--muted);text-align:right}
+.dual-waves canvas{display:block;width:100%;height:64px}
+.wave-card.assistant{border-color:#8267cf7d}
+.preflight{width:100%;border:1px solid var(--line);border-radius:16px;background:var(--card);
+  padding:12px;display:flex;align-items:center;gap:12px}
+.preflight button{flex:0 0 auto;padding:12px 14px;background:var(--card-alt);
+  color:var(--text);border:1px solid var(--line);font-size:13px}
+.preflight p{font-size:12px;line-height:1.5;color:var(--muted);margin:0;flex:1}
+.controls button,.controls select{background:var(--card-alt);color:var(--text);border:1px solid var(--line)}
+.conversation h3{color:var(--text)}
+.message.assistant{background:var(--card-alt);color:var(--text)}
+.message.user{background:#285784;color:#fff}
+#start{background:var(--button);color:#05203a}
+#end{background:var(--card);color:var(--text);border-color:var(--line)}
+@media(max-width:460px){
+  .preflight{flex-direction:column;align-items:stretch}
+  .dual-waves{gap:7px}
+  .dual-waves button,.wave-card{padding:8px}
+  .wave-head{display:block}
+  .wave-head span{display:block;text-align:left;margin-top:3px}
+  header p{font-size:10px}
+}
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style>
 </head>
 <body>
 <div class="shell">
-<header><div class="logo" aria-hidden="true">✦</div><div><h1>Hermes Voice</h1><p>Telegram Mini App · Gemini Live</p></div></header>
+<header>
+  <div class="logo" aria-hidden="true">✦</div>
+  <div class="brand"><h1>Hermes Voice</h1><p>TELEGRAM · GEMINI LIVE</p></div>
+  <button type="button" id="themeToggle" aria-label="เปลี่ยนธีม">◐ อัตโนมัติ</button>
+</header>
 <main>
 <div id="status" class="pill" role="status" aria-live="polite"><span class="dot"></span><span id="statusText">พร้อมเริ่มสนทนา</span></div>
 <div id="orb" class="orb-wrap">
   <div class="orb" aria-label="Hermes Avatar"><div class="avatar-face" aria-hidden="true"><span class="avatar-eye"></span><span class="avatar-eye"></span></div></div>
 </div>
-<button type="button" id="visualizer" aria-label="แสดงคลื่นเสียงแบบแท่ง กดเพื่อเปลี่ยน">
-  <canvas id="waveform" width="360" height="84" aria-hidden="true"></canvas>
-  <span>แตะเพื่อสลับรูปแบบคลื่นเสียง</span>
-</button>
+<section class="dual-waves" aria-label="สถานะเสียงของคุณและ Hermes">
+  <button type="button" id="visualizer" aria-label="คลื่นเสียงของคุณ กดเพื่อสลับรูปแบบ">
+    <div class="wave-head"><strong>🎙 YOU</strong><span id="userStatus" aria-live="off">ไมค์พร้อมใช้งาน</span></div>
+    <canvas id="waveform" width="360" height="64" aria-hidden="true"></canvas>
+  </button>
+  <div class="wave-card assistant" aria-label="คลื่นเสียงของ Hermes">
+    <div class="wave-head"><strong>✦ HERMES</strong><span id="hermesStatus" aria-live="off">Hermes พร้อมตอบ</span></div>
+    <canvas id="hermesWaveform" width="360" height="64" aria-hidden="true"></canvas>
+  </div>
+</section>
 <div style="text-align:center"><h2>คุยกับ Hermes</h2><p class="description" id="description">สนทนาด้วยเสียงแบบเรียลไทม์ ถามคำถามหรือสั่งงาน Hermes ได้โดยตรง</p></div>
+<div class="preflight">
+  <button type="button" id="preflight">✓ ตรวจสอบไมโครโฟนและลำโพง</button>
+  <p id="preflightResult" role="status" aria-live="polite">แนะนำให้ตรวจอุปกรณ์ก่อนเริ่มสนทนา</p>
+</div>
 <div class="actions"><button type="button" id="start">🎙 เริ่มสนทนา</button><button type="button" id="end" disabled>วางสาย</button></div>
 <div class="controls">
   <button type="button" id="mute" disabled aria-pressed="false">🎙 ปิดไมค์</button>

@@ -22,6 +22,7 @@ from urllib.parse import parse_qsl, urlparse
 from aiohttp import ClientError, ClientSession, ClientTimeout, WSMsgType, web
 
 from .alerts import gateway_watch
+from .readiness import HealthSnapshot
 from .recovery import Recovery, RecoveryStore, resume_setup, update_handle
 
 LOG = logging.getLogger("hermes.telegram_voice")
@@ -217,7 +218,7 @@ async def index(request: web.Request) -> web.FileResponse:
         "Cache-Control": "no-store",
         "Content-Security-Policy": (
             "default-src 'none'; script-src 'self' https://telegram.org; "
-            "style-src 'unsafe-inline'; connect-src 'self' wss:; "
+            "style-src 'unsafe-inline'; connect-src 'self' wss:; worker-src 'self'; "
             "img-src 'self' data:; base-uri 'none'; frame-ancestors https://web.telegram.org"
         ),
     })
@@ -232,6 +233,18 @@ async def script(request: web.Request) -> web.FileResponse:
 
 async def health(request: web.Request) -> web.Response:
     return web.json_response({"ok": True, "service": "telegram-miniapp-voice"})
+
+
+async def ready(request: web.Request) -> web.Response:
+    status, body = request.app["readiness_snapshot"].public()
+    return web.json_response(body, status=status)
+
+
+async def audio_worklet(request: web.Request) -> web.FileResponse:
+    return web.FileResponse(
+        Path(__file__).parent / "web" / "audio-worklet.js",
+        headers={"Cache-Control": "no-store", "Content-Type": "application/javascript; charset=utf-8"},
+    )
 
 
 async def socket_handler(request: web.Request) -> web.StreamResponse:
@@ -495,7 +508,7 @@ async def voice_session(
 async def on_startup(app: web.Application) -> None:
     config: Config = app["config"]
     if config.alerts_enabled:
-        app["alert_task"] = asyncio.create_task(gateway_watch(config))
+        app["alert_task"] = asyncio.create_task(gateway_watch(config, snapshot=app["readiness_snapshot"]))
 
 
 async def on_cleanup(app: web.Application) -> None:
@@ -510,8 +523,11 @@ def create_app(config: Config) -> web.Application:
     app["config"] = config
     app["call_lock"] = asyncio.Lock()
     app["recoveries"] = RecoveryStore()
+    app["readiness_snapshot"] = HealthSnapshot()
     app.router.add_get("/", index)
     app.router.add_get("/app.js", script)
+    app.router.add_get("/audio-worklet.js", audio_worklet)
+    app.router.add_get("/readyz", ready)
     app.router.add_get("/healthz", health)
     app.router.add_get("/ws", socket_handler)
     app.on_startup.append(on_startup)
