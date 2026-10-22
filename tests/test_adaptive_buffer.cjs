@@ -1,0 +1,18 @@
+"use strict";
+const assert = require("node:assert/strict");
+const {AdaptiveAudioBuffer} = require("../telegram_miniapp/web/audio-buffer.js");
+const a = new AdaptiveAudioBuffer();
+assert.ok(a.delaySeconds() >= 0.045 && a.delaySeconds() <= 0.25);
+a.observeRtt(100);
+const before = a.delaySeconds();
+a.observeRtt(1200);
+assert.ok(a.delaySeconds() > before);
+const n = a.nextTime(10, 0, .02);
+assert.equal(n.drop, false);
+assert.ok(n.when > 10);
+const stale = a.nextTime(10, 12, .02);
+assert.equal(stale.drop, true);
+assert.equal(a.drops, 1);
+a.nextTime(10, 9.5, .02);
+assert.equal(a.underruns, 1);
+console.log("AdaptiveAudioBuffer: jitter tracking, bounded buffering and drop control PASS");

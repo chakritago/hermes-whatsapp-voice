@@ -216,3 +216,32 @@ with the tag.
 ## License
 
 MIT
+
+
+## Telegram Mini App (live voice, including Windows)
+
+**New optional integration:** Talk to Hermes inside a Telegram Mini App using
+Gemini 3.8 Live (microphone streaming over HTTPS/WSS). This does **not** replace or
+modify the existing WhatsApp linked-device implementation.
+
+- Windows PowerShell launcher: telegram_miniapp/start_windows.ps1
+- Backend and Mini App: telegram_miniapp/server.py and telegram_miniapp/web/index.html
+- Owner-only Telegram initData verification, Gemini Live audio relay, Hermes ask_hermes tool
+- Installation, HTTPS proxy and configuration: [Telegram Mini App guide](docs/telegram-miniapp.md)
+- GitHub Actions runs offline tests on Windows and Linux. Includes Gemini reconnect + short-lived session recovery, Gateway health alerts, animated waveform and speaker/mic controls.
+
+**Important:** Telegram Mini App voice chat is not a native Telegram phone call.
+The app requires a publicly reachable HTTPS URL and your own Telegram bot,
+Gemini key and enabled Hermes API server. The original WhatsApp calls remain available.
+\n### Windows gateway service, dashboard and audio QA\n\nThe optional Windows Service supervises the Mini App and only a gateway that it starts itself. Added readiness/Telegram alert retry with a disk-backed queue, Gemini reconnect preservation, separate microphone/Hermes waveforms, a dark/light voice dashboard, AudioWorklet 40ms PCM capture and a local microphone/speaker preflight. See [deployment and security guide](docs/telegram-miniapp.md) before installation. Hardware and live API E2E still require your own Windows/Telegram devices and secrets.\n
+## R4: External Uptime, owner tool approval and release hardening
+
+This optional Telegram integration now includes an independent external HTTPS uptime monitor, a fail-closed *per-tool* approval button in Telegram Mini App before Hermes can execute, a dry-run-first Windows Service release gate with source/config metadata snapshots and rollback, live RTT/audio buffer diagnostics, an adaptive playback queue and audio device hot-swap recovery. All existing WhatsApp features remain intact. See [full R4 setup and limitations](docs/telegram-miniapp.md).
+
+### R5 (Draft)
+
+Added Windows Service Release simulation in CI, Hermes risk approval and privacy-preserving audit, Redis-based external monitor coordination, owner-only health dashboards, accessibility controls, advanced audio input selection, network-aware buffering and opt-in short-lived session recovery. See [R5 setup and release limitations](docs/telegram-miniapp.md). Physical tests pending.
+
+### R6: Failure injection, distributed Redis queue, secure approvals and adaptive Mini App
+
+Adds fault-injection for Windows release rollback, SHA-256 validated backups, Redis leader-fenced alert queue, server-side tool permission ceiling and HMAC chained audit, hourly/daily readiness analytics, filterable Approval Center, WebView accessibility checks, smoother device switch and opt-in session retention. The original WhatsApp implementation is unchanged. See [deployment and remaining release blockers](docs/telegram-miniapp.md).
