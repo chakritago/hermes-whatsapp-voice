@@ -8,7 +8,6 @@ gateway subprocess. Unrelated existing Hermes installations are not killed.
 from __future__ import annotations
 
 import logging
-import os
 import sys
 
 from .supervisor import GatewaySupervisor, worker_commands
@@ -17,6 +16,9 @@ LOG = logging.getLogger("hermes.windows_service")
 
 if sys.platform == "win32":
     import servicemanager
+    import win32api
+    import win32con
+    import win32security
     import win32event
     import win32service
     import win32serviceutil
@@ -40,12 +42,12 @@ if sys.platform == "win32":
         def SvcDoRun(self):
             servicemanager.LogInfoMsg("Hermes Telegram Voice service starting")
             try:
-                if (os.environ.get("HERMES_GATEWAY_COMMAND") and
-                        os.environ.get("USERNAME", "").lower() in ("system", "localsystem")):
-                    raise RuntimeError(
-                        "Refusing to launch Hermes Agent tools as LocalSystem. "
-                        "Configure a restricted Windows service account."
-                    )
+                # LocalSystem (SID S-1-5-18) is forbidden even without an owned
+                # gateway: the Mini App holds a key granting Hermes tool access.
+                token = win32security.OpenProcessToken(win32api.GetCurrentProcess(), win32con.TOKEN_QUERY)
+                sid, _attributes = win32security.GetTokenInformation(token, win32security.TokenUser)
+                if win32security.ConvertSidToStringSid(sid) == "S-1-5-18":
+                    raise RuntimeError("Configure a dedicated restricted service account; LocalSystem is forbidden")
                 self.supervisor = GatewaySupervisor(*worker_commands())
                 while self.running:
                     self.supervisor.tick()
